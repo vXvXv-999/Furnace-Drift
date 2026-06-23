@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>炉心漂移 · FURNACE DRIFT</title>
 <style>
   :root {
@@ -22,13 +22,63 @@
     color: #cdd6e4;
     user-select: none;
   }
-  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  #wrap {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
   canvas {
     display: block;
     background: #05070d;
     box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 30px 90px rgba(0,0,0,0.7);
     border-radius: 10px;
-    touch-action: none;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+
+  /* ---------- 移动端虚拟触控（PC 端彻底隐藏） ---------- */
+  #mobile-hud {
+    position: fixed; inset: 0; z-index: 12;
+    pointer-events: none;
+    display: none;
+  }
+  .mob-btn {
+    position: absolute; pointer-events: auto;
+    display: grid; place-items: center;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 15px; font-weight: 800; letter-spacing: 2px;
+    color: rgba(220, 230, 244, 0.92);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 10px;
+    backdrop-filter: blur(6px);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .mob-btn:active, .mob-btn.pressed {
+    background: rgba(0, 229, 255, 0.18);
+    border-color: rgba(0, 229, 255, 0.55);
+    color: #fff;
+  }
+  #mob-steer-left { left: 16px; bottom: 22px; width: 64px; height: 64px; }
+  #mob-steer-right { left: 88px; bottom: 22px; width: 64px; height: 64px; }
+  #mob-drift {
+    right: 16px; bottom: 22px; width: 148px; height: 56px;
+    font-size: 13px; letter-spacing: 3px;
+  }
+  #mob-pause {
+    top: 16px; right: 16px; width: 48px; height: 48px;
+    font-size: 16px; letter-spacing: 0;
+    z-index: 13;
+  }
+  @media (min-width: 768px) {
+    #mobile-hud { display: none !important; }
+  }
+  @media (max-width: 767px) {
+    #mobile-hud.on { display: block; }
+    #track-best { top: 72px; }
+    #coins { top: 126px; }
+    canvas { border-radius: 0; box-shadow: none; }
+    #wrap { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   }
 
   /* ---------- 顶部 HUD ---------- */
@@ -581,6 +631,13 @@
 <body>
   <div id="wrap"><canvas id="game"></canvas></div>
 
+  <div id="mobile-hud" aria-hidden="true">
+    <button type="button" class="mob-btn" id="mob-steer-left" aria-label="左转">&lt;</button>
+    <button type="button" class="mob-btn" id="mob-steer-right" aria-label="右转">&gt;</button>
+    <button type="button" class="mob-btn" id="mob-drift" aria-label="漂移">DRIFT</button>
+    <button type="button" class="mob-btn" id="mob-pause" aria-label="暂停">||</button>
+  </div>
+
   <div id="hud">
     <div class="chip" id="level"><div class="lab">LEVEL</div><div class="val">1</div></div>
     <div class="chip" id="timer"><div class="lab">TIME</div><div class="val">30</div></div>
@@ -763,6 +820,47 @@ window.addEventListener("keyup", (e) => {
   if (Game.state === GameState.PAUSED) return;
   if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = false; e.preventDefault(); }
 });
+
+/* ---------- 移动端触控（外挂注入 keys，不改动物理/渲染主循环） ---------- */
+const elMobileHud = document.getElementById("mobile-hud");
+const mobSteerLeft = document.getElementById("mob-steer-left");
+const mobSteerRight = document.getElementById("mob-steer-right");
+const mobDrift = document.getElementById("mob-drift");
+const mobPause = document.getElementById("mob-pause");
+
+function bindMobileHold(btn, keyName) {
+  const press = (e) => {
+    e.preventDefault();
+    keys[keyName] = true;
+    btn.classList.add("pressed");
+  };
+  const release = (e) => {
+    e.preventDefault();
+    keys[keyName] = false;
+    btn.classList.remove("pressed");
+  };
+  btn.addEventListener("touchstart", press, { passive: false });
+  btn.addEventListener("touchend", release, { passive: false });
+  btn.addEventListener("touchcancel", release, { passive: false });
+}
+
+function bindMobilePause(btn) {
+  const toggle = (e) => {
+    e.preventDefault();
+    if (canPauseFromPlay()) pauseGame();
+    else if (Game.state === GameState.PAUSED) resumeGame();
+  };
+  btn.addEventListener("touchstart", toggle, { passive: false });
+  btn.addEventListener("touchend", (e) => { e.preventDefault(); }, { passive: false });
+  btn.addEventListener("touchcancel", (e) => { e.preventDefault(); }, { passive: false });
+}
+
+bindMobileHold(mobSteerLeft, "left");
+bindMobileHold(mobSteerRight, "right");
+bindMobileHold(mobDrift, "handbrake");
+bindMobilePause(mobPause);
+
+function isMobileViewport() { return window.matchMedia("(max-width: 767px)").matches; }
 
 let pauseMenuRects = null;
 canvas.addEventListener("click", (e) => {
@@ -4145,6 +4243,7 @@ function setHudVisibility() {
   elStatus.style.display = (playing || paused) ? "block" : "none";
   elHelp.style.display = normal ? "block" : "none";
   elArmorBox.style.display = tut ? "none" : "flex";
+  elMobileHud.classList.toggle("on", (playing || paused) && !garage);
 }
 
 /* ============================================================
@@ -4432,6 +4531,7 @@ function loop(now) {
   }
 
   if (Game.state === "playing") {
+    if (isMobileViewport() && elMobileHud.classList.contains("on")) keys.up = true;
     AudioManager.playEngineDrone(Game.temp);
 
     if (Game.hitstop > 0) {
