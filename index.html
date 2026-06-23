@@ -1,0 +1,4501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>炉心漂移 · FURNACE DRIFT</title>
+<style>
+  :root {
+    --bg: #05070d;
+    --cool: #00e5ff;
+    --hot: #ff2d4d;
+    --grape: #b16bff;
+    --gold: #ffd36b;
+    --boost: #3bd1ff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #020306;
+    overflow: hidden;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: #cdd6e4;
+    user-select: none;
+  }
+  #wrap { position: fixed; inset: 0; display: grid; place-items: center; }
+  canvas {
+    display: block;
+    background: #05070d;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.04), 0 30px 90px rgba(0,0,0,0.7);
+    border-radius: 10px;
+    touch-action: none;
+  }
+
+  /* ---------- 顶部 HUD ---------- */
+  #hud {
+    position: fixed; top: 16px; left: 0; right: 0;
+    display: flex; justify-content: center; gap: 12px;
+    pointer-events: none; z-index: 5;
+  }
+  .chip {
+    background: rgba(8,12,20,0.55);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(120,150,200,0.14);
+    border-radius: 12px;
+    padding: 8px 18px;
+    text-align: center;
+    min-width: 104px;
+  }
+  .chip .lab { font-size: 10px; letter-spacing: 2px; color: #6b7689; text-transform: uppercase; }
+  .chip .val { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; color: #fff; line-height: 1.1; }
+  #mult.hot .val { color: var(--grape); text-shadow: 0 0 16px rgba(177,107,255,.9); }
+  #score .val { color: var(--cool); }
+  #timer .val { color: #fff; }
+  #timer.warn .val { color: var(--hot); text-shadow: 0 0 16px rgba(255,45,77,.9); }
+  #dist .val { color: var(--gold); }
+  #dist.lock .val { color: #6effa6; }
+
+  /* ---------- 关卡最高分（右上角） ---------- */
+  #track-best {
+    position: fixed; top: 18px; right: 18px; z-index: 6;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+    background: rgba(8,12,20,0.55); backdrop-filter: blur(8px);
+    border: 1px solid rgba(120,150,200,0.14);
+    border-radius: 12px; padding: 8px 16px;
+    pointer-events: none;
+  }
+  #track-best .lab { font-size: 10px; letter-spacing: 2px; color: #6b7689; text-transform: uppercase; }
+  #track-best .val { font-size: 20px; font-weight: 800; letter-spacing: 1px; color: var(--cool); font-variant-numeric: tabular-nums; }
+
+  /* ---------- 金币（右上角，工业风） ---------- */
+  #coins {
+    position: fixed; top: 72px; right: 18px; z-index: 6;
+    display: flex; align-items: center; gap: 9px;
+    background: rgba(8,12,20,0.55); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,211,107,0.22);
+    border-radius: 12px; padding: 8px 16px;
+    pointer-events: none;
+  }
+  #coins .coin {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff3c4, var(--gold) 55%, #b8860b);
+    box-shadow: 0 0 12px rgba(255,211,107,.6); flex: none;
+  }
+  #coins .amt { font-size: 20px; font-weight: 800; letter-spacing: 1px; color: var(--gold); font-variant-numeric: tabular-nums; }
+
+  /* ---------- 底部状态：能量 + 装甲 ---------- */
+  #status {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    z-index: 6; pointer-events: none; text-align: center; width: 360px;
+  }
+  #armor { display: flex; justify-content: center; gap: 9px; margin-bottom: 9px; }
+  #armor .pip {
+    width: 30px; height: 12px; transform: skewX(-22deg);
+    background: rgba(0,229,255,0.15);
+    border: 1px solid var(--cool);
+    box-shadow: 0 0 12px -2px var(--cool), inset 0 0 8px -3px var(--cool);
+    transition: opacity .15s, background .15s, box-shadow .15s;
+  }
+  #armor .pip.lost { opacity: .18; background: transparent; box-shadow: none; border-color: #2a3346; }
+  #energy-wrap {
+    height: 16px; border-radius: 9px; overflow: hidden; position: relative;
+    background: rgba(8,12,20,0.6); border: 1px solid rgba(120,150,200,0.18);
+    backdrop-filter: blur(6px);
+  }
+  #energy-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, #1b6e8c, var(--cool));
+    box-shadow: 0 0 16px rgba(0,229,255,.6);
+    transition: width .08s linear;
+  }
+  #energy-wrap.full #energy-fill {
+    background: linear-gradient(90deg, var(--boost), #aef3ff);
+    animation: energyPulse .7s ease-in-out infinite;
+  }
+  @keyframes energyPulse { 0%,100% { filter: brightness(1); } 50% { filter: brightness(1.5); } }
+  #energy-label {
+    font-size: 10px; letter-spacing: 3px; color: #6b7689; margin-top: 6px; text-transform: uppercase;
+  }
+  #energy-label b { color: var(--boost); }
+  #status.boosting #energy-label b { color: #aef3ff; text-shadow: 0 0 14px var(--boost); }
+
+  /* ---------- Combo 显示 ---------- */
+  #combo {
+    position: fixed; top: 96px; left: 0; right: 0; text-align: center;
+    pointer-events: none; z-index: 5; opacity: 0; transition: opacity .15s;
+  }
+  #combo.on { opacity: 1; }
+  #combo .num {
+    font-size: 42px; font-weight: 900; letter-spacing: 2px;
+    color: #fff; text-shadow: 0 0 22px rgba(255,93,59,.9), 0 0 6px rgba(255,255,255,.6);
+    line-height: 1;
+  }
+  #combo .num b { color: var(--hot); }
+  #combo .cap { font-size: 10px; letter-spacing: 4px; color: #ff8a6b; margin-top: 2px; }
+  #combo .bar {
+    width: 180px; height: 4px; margin: 6px auto 0;
+    background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;
+  }
+  #combo .bar i {
+    display: block; height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--cool), var(--hot));
+    box-shadow: 0 0 12px rgba(255,93,59,.8);
+  }
+
+  #help {
+    position: fixed; left: 18px; bottom: 16px;
+    font-size: 11px; color: #5a6477; line-height: 1.7;
+    pointer-events: none; z-index: 5;
+  }
+  #help kbd {
+    background: rgba(120,150,200,0.12); border: 1px solid rgba(120,150,200,0.2);
+    border-radius: 4px; padding: 1px 6px; color: #cdd6e4; font-family: inherit;
+  }
+
+  /* ---------- 全屏过热 / 受击闪烁 ---------- */
+  #burn {
+    position: fixed; inset: 0; pointer-events: none; z-index: 8;
+    background: radial-gradient(circle at 50% 50%, rgba(255,40,60,0) 35%, rgba(255,20,40,0.55) 100%);
+    opacity: 0; transition: opacity .08s;
+  }
+
+  /* ---------- 越野岩浆区：红色边框高频警报 ---------- */
+  #offedge {
+    position: fixed; inset: 0; pointer-events: none; z-index: 9; display: none;
+    box-shadow: inset 0 0 0 6px rgba(255,45,77,0.9), inset 0 0 60px 10px rgba(255,30,55,0.55);
+  }
+  #offedge.on { display: block; animation: offEdgeBlink .28s steps(1) infinite; }
+  @keyframes offEdgeBlink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0.25; } }
+
+  /* 倒计时·越野高频标红闪烁 */
+  #timer.offtrack .val { color: var(--hot); animation: timerAlarm .25s steps(1) infinite; }
+  @keyframes timerAlarm { 0%,49% { opacity: 1; text-shadow: 0 0 18px rgba(255,45,77,.95); } 50%,100% { opacity: 0.35; } }
+
+  /* ---------- Game Over ---------- */
+  #over {
+    position: fixed; inset: 0; z-index: 10; display: none;
+    place-items: center; text-align: center;
+    background: radial-gradient(circle at 50% 45%, rgba(60,0,10,0.55), rgba(2,3,6,0.92));
+    backdrop-filter: blur(3px);
+  }
+  #over.show { display: grid; animation: fade .25s ease; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  #over h2 { font-size: 52px; font-weight: 900; letter-spacing: 8px; color: var(--hot); text-shadow: 0 0 30px rgba(255,45,77,.8); }
+  #over .reason { font-size: 14px; letter-spacing: 3px; color: #8a93a6; margin: 8px 0 22px; }
+  #over .final { font-size: 16px; color: #cdd6e4; margin-bottom: 4px; }
+  #over .final b { color: var(--cool); font-size: 28px; }
+  #over .earn { margin-top: 14px; font-size: 14px; color: #8a93a6; }
+  #over .earn b { color: var(--gold); font-size: 22px; }
+  #over .again { margin-top: 26px; font-size: 13px; letter-spacing: 2px; color: #6b7689; }
+  #over .again kbd {
+    background: rgba(120,150,200,0.14); border: 1px solid rgba(120,150,200,0.25);
+    border-radius: 5px; padding: 3px 12px; color: #fff; font-family: inherit; font-size: 15px;
+  }
+
+  /* ---------- Start Screen ---------- */
+  #start {
+    position: fixed; inset: 0; z-index: 20;
+    display: grid; place-items: center; text-align: center;
+    background: #020306; transition: opacity .6s ease;
+  }
+  #start.fade { opacity: 0; pointer-events: none; }
+  #start .logo {
+    font-size: 60px; font-weight: 900; letter-spacing: 14px;
+    color: var(--hot); text-shadow: 0 0 40px rgba(255,45,77,.7);
+  }
+  #start .sub { font-size: 12px; letter-spacing: 8px; color: #4a5468; margin: 10px 0 44px; }
+  #start .select-hint { font-size: 11px; letter-spacing: 6px; color: #4a5468; margin-bottom: 18px; }
+  #vehicles { display: flex; gap: 18px; justify-content: center; margin-bottom: 40px; flex-wrap: wrap; }
+  .vcard {
+    --c: #00e5ff; width: 210px; padding: 18px 16px 16px;
+    background: rgba(10,14,22,0.6); border: 1px solid rgba(120,150,200,0.16);
+    border-radius: 14px; cursor: pointer; text-align: center;
+    transition: transform .15s ease, border-color .15s, box-shadow .15s, background .15s;
+  }
+  .vcard:hover { transform: translateY(-4px); border-color: var(--c); }
+  .vcard.sel {
+    border-color: var(--c); background: rgba(20,26,40,0.85);
+    box-shadow: 0 0 0 1px var(--c), 0 0 34px -6px var(--c), inset 0 0 26px -14px var(--c);
+  }
+  .vcard .preview { height: 56px; display: grid; place-items: center; margin-bottom: 12px; }
+  .vcard .car {
+    width: 64px; height: 30px; border-radius: 7px; position: relative;
+    background: #11151f; border: 2px solid var(--c); box-shadow: 0 0 18px -4px var(--c);
+  }
+  .vcard .car::before {
+    content: ""; position: absolute; right: 5px; top: 5px; bottom: 5px; width: 11px;
+    background: var(--c); border-radius: 3px; box-shadow: 0 0 10px var(--c);
+  }
+  .vcard .vname { font-size: 15px; font-weight: 800; letter-spacing: 2px; color: #fff; }
+  .vcard .vtag {
+    display: inline-block; margin: 7px 0 9px; font-size: 10px; font-weight: 800;
+    letter-spacing: 2px; padding: 2px 10px; border-radius: 20px;
+    color: var(--c); border: 1px solid var(--c);
+  }
+  .vcard .vdesc { font-size: 11px; line-height: 1.6; color: #8a93a6; min-height: 36px; }
+  .vcard .vstats { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+  .vcard .stat { display: flex; align-items: center; gap: 7px; font-size: 9px; letter-spacing: 1px; color: #6b7689; }
+  .vcard .stat .sl { width: 46px; text-align: left; text-transform: uppercase; }
+  .vcard .stat .sb { flex: 1; height: 4px; background: rgba(255,255,255,0.08); border-radius: 3px; overflow: hidden; }
+  .vcard .stat .sb i { display: block; height: 100%; background: var(--c); }
+  #start .ignite {
+    font-size: 22px; font-weight: 800; letter-spacing: 4px; color: #fff;
+    cursor: pointer; transition: opacity .2s; animation: pulseIgnite 1.05s ease-in-out infinite;
+  }
+  #start .ignite span { color: var(--cool); }
+  #start .ignite.locked {
+    animation: none; cursor: not-allowed;
+    font-size: 15px; letter-spacing: 3px; color: #44506a; opacity: .7;
+  }
+  #start .ignite.locked.nudge { animation: nudge .35s ease; }
+  @keyframes nudge { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-7px); } 75% { transform: translateX(7px); } }
+  #start .tip { margin-top: 30px; font-size: 11px; letter-spacing: 2px; color: #3a4254; line-height: 1.9; }
+  .start-actions { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  .start-actions .ignite { animation: none; margin: 0; }
+  .start-actions .ignite.secondary { font-size: 16px; letter-spacing: 5px; color: #8a93a6; }
+  .start-actions .ignite.secondary span { color: var(--gold); }
+  .start-actions .ignite:hover { opacity: 0.85; }
+  .start-actions .ignite.proving { font-size: 15px; letter-spacing: 4px; color: #6b7689; border: 1px solid rgba(255,211,107,0.25); padding: 10px 28px; border-radius: 8px; }
+  .start-actions .ignite.proving span { color: #ffd36b; }
+
+  /* ---------- 局内暂停 Pause（Canvas 绘制，DOM 层保留无障碍备用） ---------- */
+  #pause { display: none !important; }
+
+  #wflash.biome-glitch {
+    background: rgba(255,255,255,0.92); mix-blend-mode: difference;
+  }
+  #wflash.biome-glitch.on { animation: biomeGlitchFlash 1s steps(5) forwards; }
+  @keyframes biomeGlitchFlash {
+    0%,100% { opacity: 0; }
+    12%,36%,60% { opacity: 1; }
+    24%,48%,72% { opacity: 0.25; }
+    84% { opacity: 0.85; }
+  }
+  @keyframes pulseIgnite { 0%,100% { opacity: 0.4; text-shadow: none; } 50% { opacity: 1; text-shadow: 0 0 26px rgba(255,45,77,.9); } }
+
+  /* ---------- 过关闪光 ---------- */
+  #flash {
+    position: fixed; inset: 0; z-index: 9; pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, rgba(110,255,166,0.4), rgba(110,255,166,0) 60%);
+    opacity: 0; transition: opacity .35s;
+  }
+  #flash.on { opacity: 1; transition: opacity .05s; }
+
+  /* ---------- 擦边/爆气白光闪烁 ---------- */
+  #wflash {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, rgba(220,250,255,0.85), rgba(170,243,255,0.15) 70%);
+    opacity: 0; transition: opacity .22s;
+  }
+  #wflash.on { opacity: 1; transition: opacity .02s; }
+
+  #level .val { color: #aef3ff; }
+
+  /* ---------- 尾流：能量条发光提示 ---------- */
+  #energy-wrap.draft {
+    border-color: rgba(220,240,255,0.7);
+    box-shadow: 0 0 18px rgba(220,240,255,0.55), inset 0 0 14px -6px rgba(220,240,255,0.8);
+  }
+  #energy-wrap.draft #energy-fill { filter: brightness(1.35); }
+
+  /* ---------- LEVEL UP 居中大号闪烁提示 ---------- */
+  #levelup {
+    position: fixed; inset: 0; z-index: 11; display: grid; place-items: center;
+    pointer-events: none; opacity: 0;
+  }
+  #levelup.on { animation: levelUpFx 1.3s ease-out; }
+  #levelup span {
+    font-family: "Consolas", "SF Mono", "Courier New", monospace;
+    font-size: 64px; font-weight: 900; letter-spacing: 8px;
+    color: #fff; text-shadow: 0 0 30px var(--boost), 0 0 12px #aef3ff;
+    white-space: nowrap;
+  }
+  @keyframes levelUpFx {
+    0%   { opacity: 0; transform: scale(0.6); }
+    14%  { opacity: 1; transform: scale(1.12); }
+    24%  { opacity: 0.35; }
+    34%  { opacity: 1; transform: scale(1); }
+    44%  { opacity: 0.5; }
+    54%  { opacity: 1; }
+    100% { opacity: 0; transform: scale(1.05); }
+  }
+
+  /* ---------- 第一关 Boost 引导提示 ---------- */
+  #boosthint {
+    position: fixed; left: 0; right: 0; top: 38%; z-index: 11;
+    text-align: center; pointer-events: none; display: none;
+  }
+  #boosthint.on { display: block; }
+  #boosthint span {
+    font-family: "Consolas", "SF Mono", "Courier New", monospace;
+    font-size: 30px; font-weight: 800; letter-spacing: 4px;
+    color: #aef3ff; text-shadow: 0 0 22px var(--boost);
+    animation: boostHintBlink .7s steps(1) infinite;
+  }
+  #boosthint span b { color: #fff; }
+  @keyframes boostHintBlink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0.15; } }
+
+  /* 第一关：弱化发热条（隐藏车顶温度条由 JS 控制） */
+
+  /* ---------- 引导关卡居中大字提示 ---------- */
+  #tutmsg {
+    position: fixed; left: 0; right: 0; top: 30%; z-index: 12;
+    text-align: center; pointer-events: none; display: none;
+  }
+  #tutmsg.on { display: block; }
+  #tutmsg span {
+    display: inline-block;
+    font-family: "Consolas", "SF Mono", "Courier New", monospace;
+    font-size: 32px; font-weight: 800; letter-spacing: 5px;
+    color: #aef3ff; text-shadow: 0 0 24px var(--boost);
+    padding: 12px 26px; border: 1px solid rgba(0,229,255,0.3);
+    background: rgba(6,12,20,0.55); backdrop-filter: blur(6px); border-radius: 10px;
+    animation: tutBlink 1.1s ease-in-out infinite;
+  }
+  #tutmsg.warn span {
+    color: #ff8aa0; text-shadow: 0 0 26px var(--hot);
+    border-color: rgba(255,45,77,0.45); animation: tutWarn .45s steps(1) infinite;
+  }
+  #tutmsg.boost span {
+    color: #fff; font-size: 40px; border-color: rgba(174,243,255,0.6);
+    text-shadow: 0 0 30px var(--boost), 0 0 12px #fff;
+    animation: tutBlink .55s ease-in-out infinite;
+  }
+  @keyframes tutBlink { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+  @keyframes tutWarn { 0%,49% { opacity: 1; } 50%,100% { opacity: 0.25; } }
+
+  /* ---------- 通关结果横幅 ---------- */
+  #result {
+    position: fixed; inset: 0; z-index: 13; display: none;
+    place-items: center; text-align: center; pointer-events: none;
+  }
+  #result.on { display: grid; animation: fade .2s ease; }
+  #result .result-title {
+    font-family: "Consolas", "SF Mono", "Courier New", monospace;
+    font-size: 70px; font-weight: 900; letter-spacing: 10px; color: #fff;
+    text-shadow: 0 0 36px var(--res, #6effa6), 0 0 14px #fff;
+  }
+  #result .result-sub {
+    margin-top: 16px; font-size: 15px; letter-spacing: 4px; color: #9fb0c4;
+    font-family: "Consolas", monospace;
+  }
+
+  /* ---------- 关卡选择大厅 ---------- */
+  #levelselect {
+    position: fixed; inset: 0; z-index: 18; display: none;
+    place-items: center; text-align: center;
+    background: radial-gradient(circle at 50% 40%, rgba(8,18,28,0.92), rgba(2,3,6,0.97));
+    backdrop-filter: blur(6px);
+  }
+  #levelselect.on { display: grid; animation: fade .25s ease; }
+  .ls-title {
+    font-size: 40px; font-weight: 900; letter-spacing: 12px;
+    color: #fff; text-shadow: 0 0 30px rgba(0,229,255,0.6);
+  }
+  .ls-sub { font-size: 12px; letter-spacing: 5px; color: #5a6680; margin: 12px 0 34px; }
+  #stage-layout {
+    display: flex; flex-direction: column; align-items: center; gap: 20px;
+    max-width: 392px; margin: 0 auto;
+  }
+  #stage-grid {
+    display: grid; grid-template-columns: repeat(3, 116px); gap: 16px;
+    justify-content: center;
+  }
+  #stage-bonus { width: 100%; }
+  .scard {
+    position: relative; height: 116px; border-radius: 14px; cursor: pointer;
+    display: grid; place-items: center; overflow: hidden;
+    background: rgba(10,16,26,0.7); border: 1px solid rgba(120,150,200,0.16);
+    transition: transform .14s, border-color .14s, box-shadow .14s, background .14s;
+  }
+  .scard .snum {
+    font-family: "Consolas", monospace; font-size: 44px; font-weight: 900;
+    color: #4a586f; line-height: 1;
+  }
+  .scard .slabel { position: absolute; bottom: 11px; font-size: 9px; letter-spacing: 3px; color: #4a586f; }
+  /* 已解锁 */
+  .scard.unlocked { border-color: rgba(0,229,255,0.5); }
+  .scard.unlocked .snum { color: #aef3ff; text-shadow: 0 0 14px rgba(0,229,255,0.5); }
+  .scard.unlocked .slabel { color: #5faec0; }
+  .scard.unlocked:hover {
+    transform: translateY(-4px); border-color: var(--cool);
+    box-shadow: 0 0 0 1px var(--cool), 0 0 30px -6px var(--cool), inset 0 0 24px -14px var(--cool);
+    background: rgba(16,26,40,0.9);
+  }
+  /* 训练营（第 0 关） */
+  .scard.tutorial { border-color: rgba(255,211,107,0.5); }
+  .scard.tutorial .snum { color: var(--gold); text-shadow: 0 0 14px rgba(255,211,107,0.5); font-size: 38px; }
+  .scard.tutorial .slabel { color: #b89248; }
+  .scard.tutorial:hover {
+    transform: translateY(-4px); border-color: var(--gold);
+    box-shadow: 0 0 0 1px var(--gold), 0 0 30px -6px var(--gold);
+    background: rgba(26,22,12,0.9);
+  }
+  /* 锁定 */
+  .scard.locked { cursor: not-allowed; opacity: 0.5; }
+  .scard.locked .snum { color: #2a3346; }
+  .scard.locked::after {
+    content: "🔒"; position: absolute; font-size: 26px; opacity: 0.7; filter: grayscale(1);
+  }
+  .scard.locked .snum { opacity: 0.25; }
+  /* 第 10 关 · 赏金金库 */
+  .scard.bonus {
+    width: 100%; height: 88px;
+    border-color: rgba(255,211,107,0.72);
+    background: linear-gradient(135deg, rgba(28,22,6,0.92), rgba(14,12,8,0.88));
+    box-shadow: inset 0 0 40px -18px rgba(255,211,107,0.35);
+  }
+  .scard.bonus .slabel {
+    position: static; font-size: 11px; letter-spacing: 4px;
+    color: #ffd36b; text-shadow: 0 0 14px rgba(255,211,107,0.45);
+  }
+  .scard.bonus.unlocked:hover {
+    transform: translateY(-4px); border-color: #ffe566;
+    box-shadow: 0 0 0 1px #ffd36b, 0 0 36px -4px #ffd36b, inset 0 0 32px -12px rgba(255,211,107,0.5);
+    background: rgba(32,26,10,0.95);
+  }
+  .scard.bonus.locked { opacity: 0.45; }
+  .scard.bonus.locked .slabel { color: #6a5830; text-shadow: none; }
+  .ls-back {
+    margin-top: 36px; font-size: 12px; letter-spacing: 4px; color: #5a6680;
+    cursor: pointer; transition: color .15s;
+  }
+  .ls-back:hover { color: var(--cool); }
+
+  /* ---------- 车库商城 Garage（左右分栏 · 重工业赛博） ---------- */
+  #garage {
+    position: fixed; inset: 0; z-index: 19; display: none; pointer-events: none;
+  }
+  #garage.on { display: block; }
+  .garage-shutter {
+    position: absolute; inset: 0; z-index: 30; pointer-events: none;
+    background: #020306; transform: scaleY(0); transform-origin: top;
+  }
+  .garage-shutter.on { animation: garageShutter .22s ease-in forwards; }
+  @keyframes garageShutter {
+    0% { transform: scaleY(0); opacity: 1; }
+    45% { transform: scaleY(1); opacity: 1; }
+    100% { transform: scaleY(1); opacity: 0; }
+  }
+  .garage-glitch {
+    position: absolute; inset: 0; z-index: 29; pointer-events: none; opacity: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,229,255,0.04) 2px, rgba(0,229,255,0.04) 4px);
+    mix-blend-mode: screen;
+  }
+  .garage-glitch.on { animation: garageGlitch .28s steps(3) forwards; }
+  @keyframes garageGlitch {
+    0%,100% { opacity: 0; transform: translateX(0); }
+    20% { opacity: .85; transform: translateX(-6px); }
+    40% { opacity: .6; transform: translateX(8px); }
+    60% { opacity: .9; transform: translateX(-3px); }
+    80% { opacity: .4; transform: translateX(4px); }
+  }
+  .garage-stamp {
+    position: fixed; left: 28%; top: 42%; z-index: 35; pointer-events: none;
+    transform: translate(-50%,-50%) scale(2.2) rotate(-8deg); opacity: 0;
+    font-family: "Consolas", monospace; font-size: 52px; font-weight: 900; letter-spacing: 8px;
+    color: #ff6b3c; text-shadow: 0 0 40px rgba(255,80,40,0.9), 0 0 12px #fff;
+    border: 4px solid rgba(255,100,50,0.8); padding: 16px 28px; border-radius: 6px;
+    background: rgba(20,8,4,0.75); box-shadow: 0 0 60px rgba(255,60,20,0.5);
+  }
+  .garage-stamp.on { animation: garageStamp .9s cubic-bezier(.2,1.1,.3,1) forwards; }
+  @keyframes garageStamp {
+    0% { opacity: 0; transform: translate(-50%,-80%) scale(2.8) rotate(-12deg); }
+    35% { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(-6deg); }
+    100% { opacity: 0; transform: translate(-50%,-40%) scale(0.95) rotate(-4deg); }
+  }
+  .garage-panel {
+    position: absolute; top: 0; right: 0; bottom: 0; width: min(38vw, 420px); min-width: 300px;
+    z-index: 25; pointer-events: auto;
+    background: linear-gradient(90deg, rgba(2,3,6,0) 0%, rgba(4,8,14,0.88) 12%, rgba(6,10,18,0.96) 100%);
+    border-left: 1px solid rgba(0,229,255,0.12);
+    padding: 88px 28px 28px 24px;
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  .garage-panel-head { margin-bottom: 18px; }
+  .garage-tier {
+    display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 4px;
+    padding: 4px 12px; border-radius: 4px; margin-bottom: 10px;
+    border: 1px solid var(--garage-accent, var(--cool));
+    color: var(--garage-accent, var(--cool)); background: rgba(0,229,255,0.06);
+  }
+  .garage-tier.t1 { color: #b89248; border-color: rgba(255,211,107,0.5); background: rgba(255,211,107,0.06); }
+  .garage-tier.t2 { color: #aef3ff; border-color: rgba(0,229,255,0.45); }
+  .garage-tier.t3 { color: #ff6b81; border-color: rgba(255,45,77,0.5); background: rgba(255,45,77,0.08); }
+  .garage-panel .gname { font-size: 26px; font-weight: 900; letter-spacing: 4px; color: #fff; line-height: 1.2; }
+  .garage-panel .gcode { font-size: 11px; letter-spacing: 4px; color: var(--garage-accent, var(--cool)); margin-top: 6px; }
+  .garage-coins-top {
+    position: absolute; top: 28px; right: 28px; z-index: 26; pointer-events: auto;
+    font-size: 13px; letter-spacing: 3px; color: #8a93a6; padding: 10px 16px; border-radius: 10px;
+    background: rgba(10,14,22,0.85); border: 1px solid rgba(255,211,107,0.25);
+  }
+  .garage-coins-top b { color: var(--gold); font-size: 20px; margin-left: 6px; }
+  .garage-back-top {
+    position: absolute; top: 32px; left: 28px; z-index: 26; pointer-events: auto;
+    font-size: 12px; letter-spacing: 4px; color: #5a6680; cursor: pointer;
+  }
+  .garage-back-top:hover { color: var(--cool); }
+  #garage-radar { width: 100%; max-width: 220px; height: 200px; margin: 8px auto 14px; display: block; }
+  .garage-statbars { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
+  .garage-statrow { display: flex; align-items: center; gap: 10px; font-size: 10px; letter-spacing: 2px; color: #6b7689; }
+  .garage-statrow .sl { width: 72px; text-align: right; flex-shrink: 0; }
+  .garage-statrow .sb { flex: 1; height: 5px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+  .garage-statrow .sb i { display: block; height: 100%; background: var(--garage-accent, var(--cool)); border-radius: 3px; transition: width .25s ease; }
+  .garage-statrow .sv { width: 22px; font-weight: 800; color: #cdd6e4; }
+  .garage-vfx {
+    font-size: 11px; line-height: 1.65; color: #8a93a6; padding: 12px 14px; margin-bottom: 18px;
+    border-left: 2px solid var(--garage-accent, var(--cool)); background: rgba(10,16,26,0.6); border-radius: 0 8px 8px 0;
+  }
+  .garage-vfx b { display: block; font-size: 9px; letter-spacing: 3px; color: var(--garage-accent, var(--cool)); margin-bottom: 6px; }
+  .garage-price-line { font-size: 15px; letter-spacing: 3px; color: var(--gold); margin-bottom: 14px; text-align: center; }
+  .garage-actions { display: flex; flex-direction: column; gap: 10px; margin-top: auto; }
+  .garage-nav-row { display: flex; justify-content: center; gap: 12px; margin-bottom: 8px; }
+  .garage-nav {
+    width: 44px; height: 44px; border-radius: 8px; cursor: pointer;
+    background: rgba(10,16,26,0.9); border: 1px solid rgba(120,150,200,0.22);
+    color: #cdd6e4; font-size: 24px; line-height: 1;
+  }
+  .garage-nav:hover { border-color: var(--cool); }
+  .garage-action {
+    width: 100%; padding: 14px; border-radius: 10px; cursor: pointer; border: none;
+    font-size: 14px; font-weight: 800; letter-spacing: 4px; color: #fff;
+    background: rgba(16,26,40,0.95); border: 1px solid rgba(0,229,255,0.45);
+    box-shadow: 0 0 24px -8px rgba(0,229,255,0.45);
+  }
+  .garage-action:hover { transform: translateY(-1px); }
+  .garage-action.disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+  .garage-dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 12px; max-height: 48px; overflow: hidden; }
+  .garage-dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(120,150,200,0.22); flex-shrink: 0; }
+  .garage-dots i.on { background: var(--garage-accent, var(--cool)); transform: scale(1.3); }
+  .garage-stage-nav {
+    position: absolute; top: 50%; transform: translateY(-50%); z-index: 22;
+    width: 48px; height: 80px; pointer-events: auto; cursor: pointer;
+    background: rgba(4,8,14,0.5); border: 1px solid rgba(120,150,200,0.15);
+    color: #8a93a6; font-size: 32px; display: grid; place-items: center;
+  }
+  .garage-stage-nav:hover { color: var(--cool); border-color: var(--cool); }
+  .garage-stage-nav.prev { left: 12px; border-radius: 0 10px 10px 0; }
+  .garage-stage-nav.next { left: calc(68vw - 60px); border-radius: 10px 0 0 10px; }
+</style>
+</head>
+<body>
+  <div id="wrap"><canvas id="game"></canvas></div>
+
+  <div id="hud">
+    <div class="chip" id="level"><div class="lab">LEVEL</div><div class="val">1</div></div>
+    <div class="chip" id="timer"><div class="lab">TIME</div><div class="val">30</div></div>
+    <div class="chip" id="dist"><div class="lab">TARGET DIST</div><div class="val">0</div></div>
+    <div class="chip" id="score"><div class="lab">SCORE</div><div class="val">0</div></div>
+    <div class="chip" id="mult"><div class="lab">MULT</div><div class="val">x1</div></div>
+  </div>
+
+  <div id="track-best"><div class="lab">TRACK BEST</div><div class="val" id="track-best-val">---</div></div>
+  <div id="coins"><div class="coin"></div><div class="amt" id="coin-amt">0</div></div>
+
+  <div id="status">
+    <div id="armor"><div class="pip"></div><div class="pip"></div><div class="pip"></div></div>
+    <div id="energy-wrap"><div id="energy-fill"></div></div>
+    <div id="energy-label">KERS ENERGY</div>
+  </div>
+
+  <div id="combo">
+    <div class="num">x<b id="combo-num">2</b></div>
+    <div class="cap">COMBO CHAIN</div>
+    <div class="bar"><i id="combo-bar"></i></div>
+  </div>
+
+  <div id="help">
+    <span><kbd>W</kbd> 油门 · <kbd>A</kbd><kbd>D</kbd> 转向 · <kbd>Space</kbd> 漂移 · <kbd>Shift</kbd> 爆发(满能量)</span><br/>
+    <span>跟在前车正后方吃尾流持续充能 · 擦边路人车爆充能 · 追上红色领航车过关升级</span>
+  </div>
+
+  <div id="burn"></div>
+  <div id="offedge"></div>
+  <div id="flash"></div>
+  <div id="wflash"></div>
+  <div id="levelup"><span id="levelup-text">LEVEL UP : 2</span></div>
+  <div id="boosthint"><span>[ PRESS <b>SHIFT</b> TO BOOST ]</span></div>
+
+  <!-- 引导关卡居中大字提示（工业等宽 + 闪烁） -->
+  <div id="tutmsg"><span id="tutmsg-text"></span></div>
+
+  <!-- 通关结果横幅（STAGE CLEAR / TUTORIAL CLEARED） -->
+  <div id="result">
+    <div class="result-inner">
+      <div class="result-title" id="result-title">STAGE CLEAR</div>
+      <div class="result-sub" id="result-sub"></div>
+    </div>
+  </div>
+
+  <!-- 关卡选择大厅 -->
+  <div id="levelselect">
+    <div class="ls-inner">
+      <div class="ls-title">SELECT STAGE</div>
+      <div class="ls-sub">关卡选择 · 追上红色领航车解锁下一关</div>
+      <div id="stage-layout">
+        <div id="stage-grid"></div>
+        <div id="stage-bonus"></div>
+      </div>
+      <div class="ls-back" id="ls-garage">◎ GARAGE · 车库商城</div>
+      <div class="ls-back" id="ls-change-car">‹ BACK · 返回主菜单</div>
+    </div>
+  </div>
+
+  <div id="garage">
+    <div class="garage-shutter" id="garage-shutter"></div>
+    <div class="garage-glitch" id="garage-glitch"></div>
+    <div class="garage-stamp" id="garage-stamp">UNLOCKED</div>
+    <div class="garage-back-top" id="garage-back">‹ EXIT GARAGE</div>
+    <div class="garage-coins-top">COINS ◎<b id="garage-coins">0</b></div>
+    <button class="garage-stage-nav prev" id="garage-prev" type="button">‹</button>
+    <button class="garage-stage-nav next" id="garage-next" type="button">›</button>
+    <aside class="garage-panel">
+      <div class="garage-panel-head">
+        <div class="garage-tier" id="garage-tier">TIER 1</div>
+        <div class="gname" id="garage-name">Forge-Titan</div>
+        <div class="gcode" id="garage-code">锻造巨兽</div>
+      </div>
+      <canvas id="garage-radar" width="220" height="200"></canvas>
+      <div class="garage-statbars" id="garage-statbars"></div>
+      <div class="garage-vfx"><b>TRAIL VFX</b><span id="garage-vfx-desc"></span></div>
+      <div class="garage-price-line" id="garage-price">FREE</div>
+      <div class="garage-actions">
+        <button class="garage-action" id="garage-action" type="button">EQUIP</button>
+        <div class="garage-nav-row">
+          <button class="garage-nav" id="garage-prev2" type="button">‹</button>
+          <button class="garage-nav" id="garage-next2" type="button">›</button>
+        </div>
+        <div class="garage-dots" id="garage-dots"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="start">
+    <div class="start-inner">
+      <div class="logo">FURNACE DRIFT</div>
+      <div class="sub">炉心漂移 · TARGET CHASE</div>
+      <div class="select-hint">SELECT OPERATION · 选择出击方案</div>
+      <div class="start-actions">
+        <div class="ignite" id="deploy-btn">DEPLOY · <span>出击</span></div>
+        <div class="ignite secondary" id="garage-btn">GARAGE · <span>车库</span></div>
+        <div class="ignite proving" id="proving-btn">PROVING <span>GROUND</span></div>
+      </div>
+      <div class="tip">金币解锁涂装与拖尾 · 追上红色领航车过关续时<br/>Shift 满能量爆发 · ESC 暂停</div>
+    </div>
+  </div>
+
+  <div id="pause">
+    <div class="pause-inner">
+      <div class="pause-title">SYSTEM OVERRIDE</div>
+      <div class="pause-sub">暂停</div>
+      <button class="pause-btn" id="pause-resume" type="button">[ RESUME ]</button>
+      <button class="pause-btn abort" id="pause-abort" type="button">[ ABORT MISSION ]</button>
+    </div>
+  </div>
+
+  <div id="over">
+    <div>
+      <h2>CORE MELTDOWN</h2>
+      <div class="reason" id="over-reason">炉心熔毁</div>
+      <div class="final">SCORE</div>
+      <div class="final"><b id="over-score">0</b></div>
+      <div class="earn">本局金币 +<b id="over-coins">0</b> · 总计 <b id="over-total">0</b></div>
+      <div class="again" id="over-back">按 <kbd>R</kbd> 返回关卡选择 · STAGE SELECT</div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   《炉心漂移 · FURNACE DRIFT》—— 限时追击 / 充能爆发模式
+   - 物理底座：纵向/侧向速度分离的向量化模型（公式保持不变）
+   - 容错：致死碰撞框缩小 / 擦边框放大 / 3 点装甲
+   - 核心驱动：限时追上红色领航车过关续时
+   - 威胁：向下滚动的灰色路人车流
+   - 动作奖励：擦边充能 KERS，满能量 Shift 爆发无敌
+   - 经济：PlayerAssets 金币系统 + localStorage 持久化
+   - 架构：update() 与 draw() 严格分离，固定步长不掉帧
+   ============================================================ */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+/* ---------- 画布尺寸 ---------- */
+let VIEW_W = 0, VIEW_H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  VIEW_W = Math.min(window.innerWidth - 40, 1180);
+  VIEW_H = Math.min(window.innerHeight - 40, 760);
+  canvas.style.width = VIEW_W + "px";
+  canvas.style.height = VIEW_H + "px";
+  canvas.width = Math.round(VIEW_W * DPR);
+  canvas.height = Math.round(VIEW_H * DPR);
+}
+resize();
+window.addEventListener("resize", resize);
+
+/* ---------- 输入 ---------- */
+const keys = Object.create(null);
+const KEYMAP = {
+  KeyW: "up", ArrowUp: "up",
+  KeyS: "down", ArrowDown: "down",
+  KeyA: "left", ArrowLeft: "left",
+  KeyD: "right", ArrowRight: "right",
+  Space: "handbrake",
+  ShiftLeft: "boost", ShiftRight: "boost",
+  KeyR: "reset",
+};
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Escape") {
+    e.preventDefault();
+    if (canPauseFromPlay()) pauseGame();
+    else if (Game.state === GameState.PAUSED) resumeGame();
+    return;
+  }
+  if (Game.state === GameState.PAUSED) {
+    if (e.code === "KeyB") { e.preventDefault(); abortMission(); }
+    return;
+  }
+  if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = true; e.preventDefault(); }
+});
+window.addEventListener("keyup", (e) => {
+  if (Game.state === GameState.PAUSED) return;
+  if (KEYMAP[e.code]) { keys[KEYMAP[e.code]] = false; e.preventDefault(); }
+});
+
+let pauseMenuRects = null;
+canvas.addEventListener("click", (e) => {
+  if (Game.state !== GameState.PAUSED || !pauseMenuRects) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (VIEW_W / rect.width);
+  const y = (e.clientY - rect.top) * (VIEW_H / rect.height);
+  const hit = (box) => box && x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+  if (hit(pauseMenuRects.resume)) resumeGame();
+  else if (hit(pauseMenuRects.abort)) abortMission();
+});
+
+/* ---------- 数学工具 ---------- */
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const rand = (a, b) => a + Math.random() * (b - a);
+const TAU = Math.PI * 2;
+
+/* ============================================================
+   AudioManager —— 集中音频接口（预留给后续硬核工业音效）
+   ============================================================ */
+const AudioManager = {
+  _ready: false,
+  _lastPitchBucket: -1,
+  unlock() {
+    if (this._ready) return;
+    this._ready = true;
+    console.log("[AUDIO] unlock() · AudioContext 已就绪（占位）");
+  },
+  playEngineDrone(temp) {
+    const bucket = Math.floor(clamp(temp, 0, 100) / 10);
+    if (bucket !== this._lastPitchBucket) {
+      this._lastPitchBucket = bucket;
+      const pitch = (220 + temp * 6).toFixed(0);
+      console.log("[AUDIO] playEngineDrone · temp=" + temp.toFixed(0) + "% pitch≈" + pitch + "Hz");
+    }
+  },
+  playDriftSkid() { console.log("[AUDIO] playDriftSkid() · 轮胎尖啸"); },
+  playGrazeHitstop() { console.log("[AUDIO] playGrazeHitstop() · 电流爆鸣 + 时间凝滞 whoosh"); },
+  playBoost() { console.log("[AUDIO] playBoost() · KERS 爆发轰鸣"); },
+  playArmorHit() { console.log("[AUDIO] playArmorHit() · 装甲撞击金属爆响"); },
+  playOffTrack() { console.log("[AUDIO] playOffTrack() · 越野岩浆警报长鸣"); },
+  playStageClear() { console.log("[AUDIO] playStageClear() · 过关电子号角"); },
+  playMeltdown() { console.log("[AUDIO] playMeltdown() · 炉心爆裂轰鸣"); },
+  playGarageSwitch() { console.log("[AUDIO] playGarageSwitch() · 重型机械快门 + 气动阀门排气"); },
+  playGarageRev() { console.log("[AUDIO] playGarageRev() · 暴躁引擎空流轰鸣"); },
+  playGaragePurchase() { console.log("[AUDIO] playGaragePurchase() · 金属锻造 + 拉栓上膛"); },
+};
+
+/* ============================================================
+   局内经济 + 本地持久化存档 (localStorage)
+   ============================================================ */
+const MAX_STAGE = 10;
+const SAVE_KEY = "FurnaceDrift_SaveData";
+const LEGACY_SAVE_KEY = "fd_assets";
+
+const CAR_LEGACY_MAP = {
+  scale64: "spectra-hunt", papaya: "aero-dominator", drillbass: "abyssal-resonator",
+  quietstorm: "monsoon-trekker", default: "forge-titan",
+};
+function migrateCarId(id) { return CAR_LEGACY_MAP[id] || id; }
+
+const PlayerAssets = {
+  coins: 0,
+  ownedCars: ["forge-titan"],
+  equippedCarId: "forge-titan",
+  unlockedStage: 1,
+  highScores: {},
+};
+
+function levelScoreKey(level) { return "level_" + (level | 0); }
+
+function getLevelHighScore(level) {
+  const key = levelScoreKey(level);
+  return key in PlayerAssets.highScores ? (PlayerAssets.highScores[key] | 0) : null;
+}
+
+function applyHighScoresFromRaw(raw) {
+  PlayerAssets.highScores = {};
+  if (raw.highScores && typeof raw.highScores === "object" && !Array.isArray(raw.highScores)) {
+    for (const k in raw.highScores) {
+      if (typeof raw.highScores[k] === "number") PlayerAssets.highScores[k] = raw.highScores[k] | 0;
+    }
+    return false;
+  }
+  if (typeof raw.highScore === "number") {
+    PlayerAssets.highScores[levelScoreKey(1)] = raw.highScore | 0;
+    return true;
+  }
+  return false;
+}
+
+function saveGame() {
+  const data = {
+    coins: PlayerAssets.coins,
+    unlockedCars: PlayerAssets.ownedCars.slice(),
+    currentCar: PlayerAssets.equippedCarId,
+    highScores: Object.assign({}, PlayerAssets.highScores),
+    unlockedStage: PlayerAssets.unlockedStage,
+  };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (e) { /* 存储配额满等 */ }
+}
+
+function applySaveBlob(raw) {
+  if (!raw || typeof raw.coins !== "number") return false;
+  const unlocked = (raw.unlockedCars || raw.ownedCars || raw.unlockedSkins || ["forge-titan"])
+    .map((id) => migrateCarId(id === "default" ? "forge-titan" : id));
+  if (unlocked.indexOf("forge-titan") < 0) unlocked.push("forge-titan");
+  const carId = raw.currentCar || raw.equippedCarId || "forge-titan";
+  PlayerAssets.coins = raw.coins;
+  PlayerAssets.ownedCars = unlocked;
+  PlayerAssets.equippedCarId = migrateCarId(carId === "default" ? "forge-titan" : carId);
+  PlayerAssets.unlockedStage = clamp(raw.unlockedStage | 0 || 1, 1, MAX_STAGE);
+  const migratedScores = applyHighScoresFromRaw(raw);
+  if (migratedScores) saveGame();
+  return true;
+}
+
+function loadGame() {
+  try {
+    let blob = localStorage.getItem(SAVE_KEY);
+    if (blob && applySaveBlob(JSON.parse(blob))) return;
+    blob = localStorage.getItem(LEGACY_SAVE_KEY);
+    if (blob && applySaveBlob(JSON.parse(blob))) {
+      saveGame();
+      return;
+    }
+  } catch (e) { /* 损坏存档忽略 */ }
+  PlayerAssets.coins = 0;
+  PlayerAssets.ownedCars = ["forge-titan"];
+  PlayerAssets.equippedCarId = "forge-titan";
+  PlayerAssets.unlockedStage = 1;
+  PlayerAssets.highScores = {};
+}
+
+function isCarOwned(id) { return PlayerAssets.ownedCars.indexOf(id) >= 0; }
+function getCarById(id) { return CAR_ROSTER.find((c) => c.id === id); }
+function getCurrentCar() { return getCarById(PlayerAssets.equippedCarId) || CAR_ROSTER[0]; }
+
+function awardCoins(n) {
+  PlayerAssets.coins += n;
+  Game.runCoins += n;
+}
+
+function commitHighScore() {
+  if (Game.mode !== "normal" || currentLevel < 1) return;
+  const key = levelScoreKey(currentLevel);
+  const s = Math.floor(Game.score);
+  const prev = key in PlayerAssets.highScores ? (PlayerAssets.highScores[key] | 0) : 0;
+  if (s > prev) PlayerAssets.highScores[key] = s;
+}
+
+/* ============================================================
+   车辆模型（物理公式保持不变 —— 纵向/侧向速度分离）
+   ============================================================ */
+const Car = {
+  x: 0, y: 0,
+  vx: 0, vy: 0,
+  angle: -Math.PI / 2,
+  angularVel: 0,
+
+  length: 46, width: 24,
+  radius: 17,
+
+  enginePower: 1150,
+  brakePower: 1400,
+  reversePower: 460,
+  baseMaxSpeed: 760,
+  maxSpeed: 760,
+
+  tractionGrip: 0.97,
+  lateralGripNormal: 0.885,
+  lateralGripDrift: 0.99,
+
+  maxSteer: 3.7,
+  steerSpeed: 10,
+  steer: 0,
+
+  driftThreshold: 52,
+  heatRise: 15,
+  heatDrift: 30,
+  heatIdle: 11,
+  grazeGap: 15,
+  theme: null,
+  rosterId: "forge-titan",
+  trailType: "gold_sparks",
+  trailCfg: null,
+  tailwhipShakeMult: 1,
+  yawSmooth: 1,
+
+  isDrifting: false,
+  slip: 0,
+  invinc: 0,            // 受击后无敌闪烁计时（秒）
+
+  reset() {
+    this.x = 0; this.y = 0;
+    this.vx = 0; this.vy = 0;
+    this.angle = -Math.PI / 2;
+    this.angularVel = 0;
+    this.steer = 0;
+    this.isDrifting = false;
+    this.slip = 0;
+    this.invinc = 0;
+    this.maxSpeed = this.baseMaxSpeed;
+  },
+};
+
+/* ---------- 容错调参 ---------- */
+const HITBOX_SHRINK = 0.8;   // 致死碰撞框缩小 20%
+const GRAZE_EXPAND = 1.5;    // 擦边判定范围放大 50%
+const INVINC_TIME = 1.5;     // 受击无敌闪烁时长
+const MAX_ARMOR = 3;
+
+function deathHitbox() { return Car.radius * HITBOX_SHRINK; }
+function grazeReach() { return Car.grazeGap * GRAZE_EXPAND; }
+function isProtected() { return Car.invinc > 0 || Game.boosting; }
+
+/* ============================================================
+   车库 roster —— CAR_ROSTER（Tier 分级 · 1-10 参数 · 涂装/拖尾）
+   ============================================================ */
+const STAT_LABELS = [
+  { key: "topSpeed", label: "极速" },
+  { key: "acceleration", label: "加速" },
+  { key: "weight", label: "重量" },
+  { key: "driftThreshold", label: "漂移" },
+  { key: "takedownPower", label: "破坏" },
+];
+
+function statsToParams(s) {
+  return {
+    baseMaxSpeed: 600 + s.topSpeed * 40,
+    enginePower: 720 + s.acceleration * 115,
+    brakePower: 1180 + s.weight * 45,
+    reversePower: 380 + s.acceleration * 35,
+    tractionGrip: clamp(0.958 + s.topSpeed * 0.003, 0.95, 0.99),
+    lateralGripNormal: clamp(0.94 - s.weight * 0.006, 0.84, 0.93),
+    lateralGripDrift: clamp(0.978 + s.driftThreshold * 0.0012, 0.98, 0.996),
+    maxSteer: 2.4 + s.driftThreshold * 0.16,
+    steerSpeed: 5.5 + s.driftThreshold * 0.55,
+    length: 38 + s.weight * 2.0,
+    width: 19 + s.weight * 1.0,
+    radius: 11 + s.weight * 1.2,
+    driftThreshold: clamp(80 - s.driftThreshold * 4.8, 28, 72),
+    heatRise: 9 + s.topSpeed * 1.3,
+    heatDrift: 18 + s.driftThreshold * 2.8,
+    heatIdle: 7 + s.driftThreshold * 0.55,
+    grazeGap: 11 + (10 - s.weight) * 1.4,
+    yawSmooth: 0.8 + s.driftThreshold * 0.09,
+    tailwhipShakeMult: 0.82 + s.takedownPower * 0.05,
+  };
+}
+
+function buildCar(def) {
+  return Object.assign({}, def, { params: statsToParams(def.stats) });
+}
+
+const CAR_ROSTER_RAW = [
+  /* ---- Tier 1：废土改装级 ---- */
+  {
+    id: "forge-titan", name: "Forge-Titan", codename: "锻造巨兽", tier: 1, price: 0,
+    color: "#ff6b3c", trailType: "sparks",
+    trail: { hue: 18, hue2: 42, glow: 1.6, maxLife: [0.3, 0.65], speed: [70, 200] },
+    vfxDesc: "重型火花拖尾 · 漂移掉落金属碎屑粒子，甩尾击飞压迫感极强。",
+    desc: "喷砂粗钢焊接车身，裸露液压活塞，黄黑警示条纹，底部熔炉红光。",
+    stats: { topSpeed: 4, acceleration: 3, weight: 10, driftThreshold: 4, takedownPower: 9 },
+    theme: { skin: "forge", body: "#2a2420", bodyDrift: "#3a3028", stroke: "#6a5a48", strokeDrift: "#ff6b3c", accent: "#ffd36b", glow: "rgba(255,107,60,0.9)" },
+  },
+  {
+    id: "monsoon-trekker", name: "Monsoon-Trekker", codename: "季风行者", tier: 1, price: 600,
+    color: "#5fcf8a", trailType: "water_vapor",
+    trail: { hue: 165, hue2: 195, glow: 1.3, maxLife: [0.5, 0.9], speed: [25, 80] },
+    vfxDesc: "冷凝水汽拖尾 · 车身常驻水滴反光，全天候越野底盘稳定。",
+    desc: "哑光岩灰防水涂层，机能战术绑带与荧光绿卡扣，越野底盘。",
+    stats: { topSpeed: 5, acceleration: 5, weight: 7, driftThreshold: 6, takedownPower: 6 },
+    theme: { skin: "monsoon", body: "#3a4248", bodyDrift: "#4a5258", stroke: "#6a7880", strokeDrift: "#5fcf8a", accent: "#3dff8a", glow: "rgba(95,207,138,0.85)" },
+  },
+  /* ---- Tier 2：赛博性能级 ---- */
+  {
+    id: "storm-vanguard", name: "Storm-Vanguard", codename: "废土机能款", tier: 2, price: 1500,
+    color: "#5fa8ff", trailType: "plasma",
+    trail: { hue: 205, hue2: 228, glow: 2.0, maxLife: [0.35, 0.58], speed: [90, 230] },
+    vfxDesc: "等离子电弧拖尾 · 加速时车身周围蓝色静电环绕。",
+    desc: "哑光黑灰主色，暗色反光条，粗犷独立悬挂。",
+    stats: { topSpeed: 7, acceleration: 8, weight: 6, driftThreshold: 7, takedownPower: 5 },
+    theme: { skin: "storm", body: "#141820", bodyDrift: "#1c2430", stroke: "#3a4a5a", strokeDrift: "#5fa8ff", accent: "#5fa8ff", glow: "rgba(95,168,255,0.9)" },
+  },
+  {
+    id: "spectra-hunt", name: "Spectra-Hunt", codename: "珍藏合金款", tier: 2, price: 2200,
+    color: "#ffd36b", trailType: "metallic",
+    trail: { hue: 46, hue2: 52, glow: 2.1, maxLife: [0.32, 0.72], speed: [100, 270] },
+    vfxDesc: "高反光金属火花 · 极度亮眼的甩尾胎烟与金色碎屑。",
+    desc: "电镀金属漆，五辐电镀轮毂，未开封合金压铸模型质感。",
+    stats: { topSpeed: 8, acceleration: 7, weight: 5, driftThreshold: 8, takedownPower: 4 },
+    theme: { skin: "spectra", body: "#3a4048", bodyDrift: "#4a5058", stroke: "#889098", strokeDrift: "#ffd36b", accent: "#ffd36b", glow: "rgba(255,211,107,0.92)" },
+  },
+  {
+    id: "abyssal-resonator", name: "Abyssal-Resonator", codename: "渊夜音波", tier: 2, price: 1800,
+    color: "#8b1a2a", trailType: "sonic",
+    trail: { hue: 350, hue2: 8, glow: 1.8, maxLife: [0.2, 0.5], speed: [110, 290] },
+    vfxDesc: "低频声波震荡 · 漂移释放暗红脉冲环，甩尾击飞震屏 +20%。",
+    desc: "全黑金属装甲，巨大防滚网，内部暗红脉冲光如重低音音箱。",
+    stats: { topSpeed: 6, acceleration: 6, weight: 9, driftThreshold: 5, takedownPower: 8 },
+    theme: { skin: "abyssal", body: "#0a0a0c", bodyDrift: "#141018", stroke: "#2a2a32", strokeDrift: "#8b1a2a", accent: "#6b1420", glow: "rgba(139,26,42,0.92)" },
+  },
+  /* ---- Tier 3：极限传奇级 ---- */
+  {
+    id: "endurance-787", name: "Endurance-787", codename: "传奇转子原型", tier: 3, price: 5500,
+    color: "#6effa6", trailType: "rotary",
+    trail: { hue: 195, hue2: 210, glow: 2.2, maxLife: [0.25, 0.45], speed: [140, 320] },
+    vfxDesc: "高频转子回火 · 排气管持续喷吐幽蓝火焰。",
+    desc: "复古高对比拼色，极低风阻流线，C 组原型大尾翼。",
+    stats: { topSpeed: 10, acceleration: 9, weight: 4, driftThreshold: 9, takedownPower: 3 },
+    theme: { skin: "endurance", body: "#1a2838", bodyDrift: "#243848", stroke: "#6effa6", strokeDrift: "#aef3ff", accent: "#6effa6", glow: "rgba(110,255,166,0.9)" },
+  },
+  {
+    id: "aero-dominator", name: "Aero-Dominator", codename: "涡流统帅", tier: 3, price: 7000,
+    color: "#1a3a6a", trailType: "aero",
+    trail: { hue: 210, hue2: 225, glow: 1.5, maxLife: [0.4, 0.7], speed: [60, 150] },
+    vfxDesc: "冷凝气流尾迹 · 高速时车头突破阻力的白色气雾。",
+    desc: "哑光海军蓝配暗红碳纤维，开轮设计，巨大前铲空气动力学。",
+    stats: { topSpeed: 9, acceleration: 10, weight: 3, driftThreshold: 10, takedownPower: 2 },
+    theme: { skin: "aero", body: "#0c1830", bodyDrift: "#142040", stroke: "#8b2030", strokeDrift: "#c03040", accent: "#aef3ff", glow: "rgba(174,243,255,0.88)" },
+  },
+  {
+    id: "core-meltdown", name: "Core-Meltdown", codename: "反应堆核心", tier: 3, price: 8500,
+    color: "#ff4500", trailType: "heat",
+    trail: { hue: 12, hue2: 35, glow: 2.3, maxLife: [0.3, 0.55], speed: [90, 240] },
+    vfxDesc: "高温热扭曲 · 加速时屏幕边缘热浪视觉扭曲。",
+    desc: "极简防滚架，后置超高温发光反应堆，排气管烧至通红。",
+    stats: { topSpeed: 10, acceleration: 10, weight: 5, driftThreshold: 7, takedownPower: 7 },
+    theme: { skin: "meltdown", body: "#1a0c08", bodyDrift: "#2a140c", stroke: "#ff4500", strokeDrift: "#ff8040", accent: "#ff6b3c", glow: "rgba(255,69,0,0.95)" },
+  },
+  {
+    id: "bio-mech", name: "Bio-Mech Symbiote", codename: "异星共生体", tier: 3, price: 10000,
+    color: "#9b6bff", trailType: "biomech",
+    trail: { hue: 270, hue2: 300, glow: 1.9, maxLife: [0.28, 0.6], speed: [80, 220] },
+    vfxDesc: "故障抖动与蒸汽 · 爆气/撞击时装甲张开释放高压蒸汽。",
+    desc: "暗灰金属与暗紫生物肌肉交织，带呼吸感脉冲光源。",
+    stats: { topSpeed: 8, acceleration: 9, weight: 8, driftThreshold: 8, takedownPower: 10 },
+    theme: { skin: "biomech", body: "#1a1828", bodyDrift: "#2a2440", stroke: "#4a3868", strokeDrift: "#9b6bff", accent: "#c9b3ff", glow: "rgba(155,107,255,0.92)" },
+  },
+];
+
+const CAR_ROSTER = CAR_ROSTER_RAW.map(buildCar);
+const GARAGE_STAGE_W = 0.68;   // 左侧展台占屏宽比例
+
+function applyCarById(id) {
+  const car = getCarById(migrateCarId(id));
+  if (!car) return;
+  const p = car.params;
+  Object.assign(Car, {
+    enginePower: p.enginePower, brakePower: p.brakePower, reversePower: p.reversePower,
+    baseMaxSpeed: p.baseMaxSpeed, maxSpeed: p.baseMaxSpeed,
+    tractionGrip: p.tractionGrip,
+    lateralGripNormal: p.lateralGripNormal, lateralGripDrift: p.lateralGripDrift,
+    maxSteer: p.maxSteer, steerSpeed: p.steerSpeed,
+    length: p.length, width: p.width, radius: p.radius,
+    driftThreshold: p.driftThreshold, heatRise: p.heatRise, heatDrift: p.heatDrift,
+    heatIdle: p.heatIdle, grazeGap: p.grazeGap,
+    yawSmooth: p.yawSmooth || 1, tailwhipShakeMult: p.tailwhipShakeMult || 1,
+    takedownPower: car.stats.takedownPower,
+    theme: car.theme, rosterId: car.id, trailType: car.trailType, trailCfg: car.trail,
+  });
+}
+
+/* ============================================================
+   全局游戏状态
+   ============================================================ */
+const GameState = {
+  VEHICLE: "vehicle",
+  GARAGE: "garage",
+  MENU: "menu",
+  PLAYING: "playing",
+  PAUSED: "paused",
+  OVER: "over",
+};
+
+let currentLevel = 1;     // 当前关卡（驱动距离/密度/充能/速度曲线）
+
+const Game = {
+  state: GameState.VEHICLE,
+  mode: "normal",         // normal | tutorial
+  level: 1,
+  currentBiome: 1,
+  biomeGlitch: 0,
+  pauseReturn: null,
+  garageBrowseIdx: 0,
+  garageReturn: "vehicle",
+  garageSpin: 0,
+  garageFx: { slam: 0, fov: 0, revT: 0 },
+  temp: 0,
+  score: 0,
+  multiplier: 1,
+  multTimer: 0,
+  overReason: "",
+
+  // 追击
+  timeLeft: 30,
+  playTime: 0,            // 本局已进行时长（用于第一关引导/等候）
+  slipstream: false,      // 尾流状态（低风险充能）
+  targetDist: 0,
+  caught: false,          // 当前帧是否已判定追上（防重复）
+  paceSlow: false,        // 橡皮筋补偿：领航车强制减速中
+  paceMercy: 0,           // 终极怜悯：撞击后领航车强制龟速倒计时（秒）
+  offTrack: false,        // 是否驶出赛道边界（软惩罚）
+
+  // 能量 / 爆发
+  energy: 0,              // 0~100
+  boosting: false,
+  boostTimer: 0,
+  boostGrip: 0,           // 0~1 轨道车物理混合系数（爆发结束有 0.2s 过渡）
+  boostPrev: false,       // Shift 边沿检测
+  hasBoosted: false,      // 本局是否已释放过爆发（第一关引导用）
+
+  // 装甲
+  armor: MAX_ARMOR,
+
+  // 经济（本局产出）
+  runCoins: 0,
+
+  // 连击
+  combo: 0, comboFill: 0, straightTimer: 0,
+
+  // 镜头
+  shake: 0, shakeX: 0, shakeY: 0,
+  shakeHold: 0, shakeHoldT: 0,
+  timeScale: 1, hitstop: 0,
+
+  // 训练场 Proving Ground
+  tutSpawnTimer: 2.5,
+  tutTakedowns: 0,
+
+  reset() {
+    this.state = "playing";
+    this.temp = 0;
+    this.score = 0;
+    this.multiplier = 1;
+    this.multTimer = 0;
+    this.timeLeft = 30;
+    this.playTime = 0;
+    this.targetDist = 0;
+    this.caught = false;
+    this.paceSlow = false;
+    this.paceMercy = 0;
+    this.offTrack = false;
+    this.slipstream = false;
+    this.energy = 0;
+    this.boosting = false;
+    this.boostTimer = 0;
+    this.boostGrip = 0;
+    this.boostPrev = false;
+    this.hasBoosted = false;
+    this.armor = MAX_ARMOR;
+    this.runCoins = 0;
+    this.combo = 0; this.comboFill = 0; this.straightTimer = 0;
+    this.shake = 0; this.shakeHold = 0; this.shakeHoldT = 0; this.timeScale = 1; this.hitstop = 0;
+    this.tutSpawnTimer = 2.5; this.tutTakedowns = 0;
+    this.biomeGlitch = 0;
+  },
+};
+
+/* ---------- 玩法常量 ---------- */
+const STAGE_TIME_BONUS = 20;       // 过关续时
+const CATCH_RADIUS = 96;           // 追上判定半径
+const PACE_BASE_FACTOR = 0.75;     // 领航车基础 = 玩家极速的 75%（第一关）
+const PACE_LEVEL_STEP = 0.02;      // 每关领航车极速上限 +2%（逼近玩家极速）
+const PACE_FACTOR_CAP = 0.97;      // 领航车极速系数上限
+const ACCEL_BOOST = 1.2;           // 玩家基础加速度 +20%（碰撞后更快回极速）
+const COURSE_HALF = 552;           // 路面半宽（路人车横向散布范围）·全局拓宽 15%
+const TRACK_EDGE = 529;            // 赛道左右边界（世界 X = ±此值）·全局拓宽 15%
+const OFFTRACK_SPEED = 0.40;       // 出界软惩罚：极速强制降至 40%
+const CHICANE_CLEAR_Y = 300;       // 减速弯前后此范围内禁止生成路人车
+const L1_PACE_WAIT_TIME = 5;       // 第一关：开局领航车“等候”时长
+const L1_PACE_WAIT_FACTOR = 0.30;  // 等候期领航车 = 玩家极速的 30%
+const GRAZE_HEAT_RELIEF = 35;      // 每次擦边降温
+const GRAZE_COINS = 5;             // 每次擦边金币
+const CATCH_COINS = 50;            // 过关金币
+const BOOST_DURATION = 3;          // 爆发时长
+const BOOST_SPEED_MULT = 1.5;      // 爆发突破极速倍率
+
+// 尾流（Slipstream / Drafting）
+const SLIP_Y_RANGE = 150;          // 跟在前车 150px 内
+const SLIP_ENERGY_RATE = 15;       // 尾流每秒充能（≈ +0.25/帧 @60fps）
+const SLIP_HEAT_RATE = 8;          // 尾流每秒轻微降温
+
+// 橡皮筋阈值（一维距离）
+const RB_SPRINT_DIST = 300;        // 距离 < 此值：领航车冲刺提速
+const RB_FAR_TRIGGER = 2000;       // 距离 > 此值：触发强制减速补偿
+const RB_RECOVER_DIST = 1500;      // 追近到此值以内：解除补偿
+const RB_SLOW_FACTOR = 0.40;       // 补偿期：领航车 = 玩家极速的 40%
+const RB_SPRINT_BONUS = 0.12;      // 冲刺额外提速
+
+/* ---------- 动态弯道（Procedural S-Curves） ---------- */
+const CURVE_FREQ = 0.0016;         // 赛道弯曲空间频率（rad/px）→ 波长 ≈ 3900px
+const CURVE_BASE_AMP = 168;        // 基础振幅（+40% 防直线逃课）
+const CURVE_LEVEL_AMP = 39;        // 每关增幅（+40%）
+const CURVE_AMP_CAP = 480;         // 振幅上限（同步提高）
+const DRIFT_CURVE_ASSIST = 0.42;   // 顺弯漂移速度补偿（maxSpeed 分数/秒）
+const OFFTRACK_HEAT_RATE = 30;     // 越野岩浆区发热速率（%/秒）
+
+/* ---------- 场景演进 Biome（每 3 关切换） ---------- */
+const BIOME = { GRID_ZERO: 0, FURNACE: 1, COLD: 2, WASTELAND: 3, VAULT: 4 };
+const BIOME_NAMES = ["GRID-ZERO", "FURNACE CORE", "COLD DRAIN", "WASTELAND", "THE VAULT"];
+function levelToBiome(lv) {
+  if (lv <= 0) return BIOME.GRID_ZERO;
+  if (lv === 10) return BIOME.VAULT;
+  if (lv <= 3) return BIOME.FURNACE;
+  if (lv <= 6) return BIOME.COLD;
+  return BIOME.WASTELAND;
+}
+function isBonusStage() { return currentLevel === 10 && Game.mode === "normal"; }
+function bonusPayoutMult() { return isBonusStage() ? 2 : 1; }
+function biomePhys() {
+  const b = Game.currentBiome;
+  if (b === BIOME.VAULT) return { friction: 1.0, driftSlide: 1.0, steer: 1.0, drag: 1.0, dragFloor: 0 };
+  if (b === BIOME.COLD) return { friction: 0.58, driftSlide: 1.30, steer: 0.76, drag: 1.0 };
+  if (b === BIOME.WASTELAND) return { friction: 1.0, driftSlide: 1.0, steer: 1.0, drag: 1.55, dragFloor: 0.6 };
+  return { friction: 1.0, driftSlide: 1.0, steer: 1.0, drag: 1.0, dragFloor: 0 };
+}
+function syncBiomeFromLevel(lv, playTransition) {
+  const nb = levelToBiome(lv);
+  Game.level = lv;
+  if (playTransition && Game.currentBiome !== nb && lv > 0 && Game.mode === "normal") {
+    Game.currentBiome = nb;
+    triggerBiomeGlitch();
+  } else {
+    Game.currentBiome = nb;
+  }
+}
+function triggerBiomeGlitch() {
+  Game.biomeGlitch = 1;
+  if (typeof elWFlash !== "undefined") {
+    elWFlash.classList.add("biome-glitch", "on");
+    clearTimeout(wflashTimer);
+    wflashTimer = setTimeout(() => {
+      elWFlash.classList.remove("on", "biome-glitch");
+    }, 1000);
+  }
+  screenShake(18, 0.35);
+  AudioManager.playGarageSwitch();
+}
+
+/* ---------- 惯性漂移物理（车身朝向 yaw 与运动轨迹分离） ---------- */
+const TURN_REF_SPEED   = 150;      // 达到该速度即拥有完整转向权限（低速难转向）
+const YAW_RESPONSE     = 9.0;      // 角速度向目标值收敛的响应速度
+const SAT_GRIP         = 6.2;      // 抓地时的自动回正力矩（车头自动对齐运动方向→稳定好开）
+const SAT_DRIFT        = 1.15;     // 漂移时的回正力矩（极弱→允许大角度甩尾，必须反打救车）
+const DRIFT_ENTER_ANGLE = 0.34;    // 进入漂移的滑动角阈值（rad ≈ 19.5°）
+const DRIFT_EXIT_ANGLE  = 0.17;    // 退出漂移的滑动角阈值（迟滞，约 9.7°）
+const DRIFT_ENTER_STEER = 0.62;    // 高速猛打方向触发漂移的转向量阈值
+const GRIP_RECOVERY     = 0.30;    // 抓回的横向动能有多少转为前向（出弯不掉速）
+const BOOST_GRIP_FADE   = 0.20;    // 爆发结束后轨道车物理的过渡时间（秒，防止瞬间甩尾）
+
+function curveAmp() {
+  if (Game.mode === "tutorial") return 0;
+  return Math.min(CURVE_BASE_AMP + currentLevel * CURVE_LEVEL_AMP, CURVE_AMP_CAP);
+}
+// 赛道中心线在世界 Y 处的 X 偏移（正弦波）—— 一切随之弯曲
+function curveAt(y) { return Math.sin(y * CURVE_FREQ) * curveAmp(); }
+// 弯道在某点的斜率（用于入弯速度补偿判断）
+function curveSlope(y) { return CURVE_FREQ * curveAmp() * Math.cos(y * CURVE_FREQ); }
+
+/* ---------- 难度平滑系数（按关卡） ---------- */
+// 热量增加速率：1关 0 · 2关 30% · 3关 60% · 4关+ 100%
+function heatScale() {
+  if (Game.mode === "tutorial") return 1;   // 引导关卡需要发热做教学
+  if (currentLevel <= 1) return 0;
+  if (currentLevel === 2) return 0.3;
+  if (currentLevel === 3) return 0.6;
+  return 1;
+}
+// 抓地力辅助倍率（侧向摩擦放大）：1关 +50% · 2关 +25% · 3关+ 正常
+function gripAssist() {
+  if (Game.mode === "tutorial") return 1.5;
+  if (currentLevel <= 1) return 1.5;
+  if (currentLevel === 2) return 1.25;
+  return 1.0;
+}
+
+/* ============================================================
+   实体集合
+   ============================================================ */
+const traffic = [];
+const tireMarks = [];
+const sparks = [];
+const floaters = [];
+const airflow = [];          // 尾流白色气流线粒子
+const debris = [];           // 撞击碎片（旋转方块）
+const garageDust = [];       // 车库展台灰尘粒子
+const arcs = [];             // 擦边电弧（青蓝闪电）
+const speedLines = [];       // KERS 爆气速度线
+const tutObstacles = [];
+const chicanes = [];
+const roadHazards = [];
+const biomeParticles = [];
+let hazardSpawnTimer = 4.5;
+const MAX_TIRE_MARKS = 900;  // 胎印上限（性能）
+const MAX_SPARKS = 520;      // 火花上限
+const MAX_DEBRIS = 240;      // 碎片上限
+
+const Pace = { x: 0, y: 0, angle: -Math.PI / 2, pulse: 0 };
+
+/* ============================================================
+   关卡参数表 LevelConfig —— 玩家选哪关就加载哪关的数值
+   （以计算公式动态分配：领航车速度 / 路人车密度 / 初始距离 / 时限）
+   ============================================================ */
+function stageConfig(lv) {
+  let density = clamp(Math.round(3 * Math.pow(1.15, lv - 1)), 3, 24);
+  if (lv <= 3) density = Math.max(2, Math.round(density * 0.65));  // 熔炉新手期：低密度
+  if (lv === 1) density = 2;
+  if (lv === 2) density = Math.max(2, Math.round(density * 0.5));
+  if (lv === 10) {
+    const base9 = clamp(Math.round(3 * Math.pow(1.15, 8)), 3, 24);
+    density = Math.min(base9 * 2, 48);
+  }
+  return {
+    timeLimit: 30,
+    lead: lv === 10 ? 500 : (600 + lv * 300),
+    trafficDensity: density,
+    paceFactor: Math.min(PACE_BASE_FACTOR + (Math.min(lv, 9) - 1) * PACE_LEVEL_STEP, PACE_FACTOR_CAP),
+  };
+}
+
+function hazardsUnlocked() {
+  return currentLevel >= 4 && currentLevel < 10 && Game.mode === "normal" && Game.state === "playing";
+}
+
+// 动态路人车密度（来自 LevelConfig）
+function trafficTarget() { return stageConfig(currentLevel).trafficDensity; }
+
+// 领航车基础速度系数（来自 LevelConfig）
+function paceBaseFactor() { return stageConfig(currentLevel).paceFactor; }
+
+// 高等级路人车横向变道幅度（熔炉期几乎不变道，Level 4+ 逐步增加）
+function trafficDriftRange() {
+  if (currentLevel <= 3) return 3;
+  return 8 + clamp(currentLevel - 4, 0, 8) * 6;
+}
+
+// 该 Y 是否与任意减速弯过近（±CHICANE_CLEAR_Y）→ 过弯时禁止堵车
+function nearChicane(y) {
+  for (let i = 0; i < chicanes.length; i++) {
+    if (Math.abs(chicanes[i].y - y) < CHICANE_CLEAR_Y) return true;
+  }
+  return false;
+}
+function spawnNormalTraffic(t) {
+  t.type = "normal";
+  const vault = isBonusStage();
+  t.laneX = rand(-COURSE_HALF * 0.88, COURSE_HALF * 0.88);
+  let ty = Car.y - rand(vault ? 180 : 320, vault ? 780 : 1100);
+  for (let tries = 0; tries < 6 && nearChicane(ty); tries++) ty = Car.y - rand(320, 1300);
+  t.y = ty;
+  t.x = curveAt(t.y) + t.laneX;
+  t.w = rand(vault ? 22 : 26, vault ? 28 : 34);
+  t.h = rand(vault ? 40 : 46, vault ? 50 : 60);
+  t.r = Math.hypot(t.w, t.h) / 2 * (vault ? 0.52 : 0.6);
+  t.speed = rand(vault ? 55 : 70, vault ? 130 : 150);
+  const dr = trafficDriftRange();
+  t.drift = rand(-dr, dr) * 0.4;
+  t.laneTimer = rand(2.5, 5);
+  t.grazeCD = 0;
+  t.shade = Math.floor(rand(70, 120));
+  t.pulse = 0;
+  t.homing = 0;
+}
+function spawnJuggernaut(t) {
+  t.type = "juggernaut";
+  t.laneX = rand(-COURSE_HALF * 0.35, COURSE_HALF * 0.35);
+  t.y = Car.y - rand(480, 980);
+  t.x = curveAt(t.y) + t.laneX;
+  t.w = TRACK_EDGE * 0.95;
+  t.h = 88;
+  t.r = Math.hypot(t.w, t.h) / 2 * 0.55;
+  t.speed = rand(45, 75);
+  t.drift = 0;
+  t.laneTimer = 99;
+  t.grazeCD = 0;
+  t.shade = 55;
+  t.pulse = 0;
+  t.homing = 0;
+}
+function spawnTickBomber(t) {
+  t.type = "tick_bomber";
+  t.laneX = rand(-COURSE_HALF * 0.7, COURSE_HALF * 0.7);
+  t.y = Car.y - rand(360, 900);
+  t.x = curveAt(t.y) + t.laneX;
+  t.w = 22;
+  t.h = 28;
+  t.r = 16;
+  t.speed = rand(130, 190);
+  t.drift = 0;
+  t.laneTimer = rand(1.2, 2.5);
+  t.grazeCD = 0;
+  t.shade = 90;
+  t.pulse = rand(0, TAU);
+  t.homing = 1;
+}
+function spawnEmpStrip() {
+  const frac = rand(0.33, 0.5);
+  const stripW = TRACK_EDGE * 2 * frac;
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const relX = side < 0 ? (-TRACK_EDGE + stripW / 2) : (TRACK_EDGE - stripW / 2);
+  roadHazards.push({
+    type: "emp",
+    y: Car.y - rand(700, 1100),
+    relX: relX,
+    w: stripW,
+    h: 22,
+    hitW: stripW * 0.8,
+    hitH: 22 * 0.8,
+    x: 0,
+    pulse: rand(0, TAU),
+  });
+}
+function spawnObstacle(t) {
+  if (Game.mode === "tutorial" || Game.state !== "playing") return;
+  if (isBonusStage()) { spawnNormalTraffic(t); return; }
+  // Biome 1 / Level 1-3：仅普通路人车，绝不生成特殊高级障碍
+  if (currentLevel <= 3 || Game.currentBiome === BIOME.FURNACE) {
+    spawnNormalTraffic(t);
+    return;
+  }
+  if (!hazardsUnlocked()) { spawnNormalTraffic(t); return; }
+  const r = Math.random();
+  if (r < 0.028) { spawnJuggernaut(t); return; }
+  if (Game.currentBiome === BIOME.WASTELAND && r < 0.10) { spawnTickBomber(t); return; }
+  spawnNormalTraffic(t);
+}
+function spawnTrafficCar(t) { spawnObstacle(t); }
+function initTraffic() {
+  traffic.length = 0;
+  for (let i = 0; i < trafficTarget(); i++) {
+    const t = {};
+    spawnTrafficCar(t);
+    traffic.push(t);
+  }
+}
+function resetPace() {
+  // 动态初始距离来自 LevelConfig（第一关约 900，新手 10 秒内即可追上）
+  Pace.y = Car.y - stageConfig(currentLevel).lead;
+  Pace.x = curveAt(Pace.y);     // 领航车沿赛道中心线
+  Pace.angle = -Math.PI / 2;
+  Pace.pulse = 0;
+  Game.paceSlow = false;
+}
+
+function emitTireMark(x, y, a, ang, w) {
+  // 存朝向 + 宽度，绘制成沿车身方向的黑色短条（连成连续胎痕）
+  tireMarks.push({ x, y, a, ang: ang || 0, w: w || 3.2 });
+  if (tireMarks.length > MAX_TIRE_MARKS) tireMarks.shift();
+}
+function emitSpark(x, y, dirX, dirY, intensity, hue, glow, behavior) {
+  if (sparks.length >= MAX_SPARKS) return;
+  const speed = rand(60, 300) * intensity;
+  const spread = rand(-1.5, 1.5);
+  const cs = Math.cos(spread), sn = Math.sin(spread);
+  const sx = dirX * cs - dirY * sn;
+  const sy = dirX * sn + dirY * cs;
+  sparks.push({
+    x, y,
+    vx: sx * speed + rand(-50, 50),
+    vy: sy * speed + rand(-50, 50),
+    life: 0, maxLife: rand(0.28, 0.7),
+    size: rand(1.2, 3.4), hue: hue + rand(-12, 12), glow: glow || 1,
+    behavior: behavior || "default",
+    baseSize: rand(1.2, 3.4),
+    bounce: 0, onGround: false,
+    glitchT: Math.random() * 100,
+  });
+}
+// 车库专属拖尾：按 trailType 发射不同 behavior 的粒子
+function emitTrailSpark(x, y, dirX, dirY, intensity) {
+  const cfg = Car.trailCfg;
+  if (!cfg || sparks.length >= MAX_SPARKS) return;
+  const tt = Car.trailType;
+  const beh = tt === "water_vapor" ? "frost" : (tt === "metallic" ? "gold_sparks" : (tt === "sonic" ? "frequency" : tt));
+  const speed = rand(cfg.speed[0], cfg.speed[1]) * intensity;
+  const spread = rand(-1.2, 1.2);
+  const cs = Math.cos(spread), sn = Math.sin(spread);
+  const sx = dirX * cs - dirY * sn;
+  const sy = dirX * sn + dirY * cs;
+  const hue = rand(cfg.hue, cfg.hue2);
+  const baseSize = (beh === "frost") ? rand(2.8, 5.5) : rand(1.4, 3.6);
+  sparks.push({
+    x, y,
+    vx: sx * speed + rand(-30, 30),
+    vy: sy * speed + rand(-30, 30),
+    life: 0,
+    maxLife: rand(cfg.maxLife[0], cfg.maxLife[1]),
+    size: baseSize,
+    baseSize: baseSize,
+    hue: hue,
+    glow: cfg.glow * (1 + (Game.temp / 100) * 0.4),
+    behavior: beh,
+    bounce: beh === "gold_sparks" ? rand(1, 3) : 0,
+    onGround: false,
+    glitchT: Math.random() * 100,
+    prevX: x, prevY: y,
+    groundY: y + 12,
+  });
+}
+// 撞击碎片：红黄相间的旋转方块
+function emitDebris(x, y, dirX, dirY, count, hot) {
+  for (let i = 0; i < count; i++) {
+    if (debris.length >= MAX_DEBRIS) break;
+    const ang = Math.atan2(dirY, dirX) + rand(-1.0, 1.0);
+    const sp = rand(120, 460);
+    const warm = Math.random() < 0.5;
+    debris.push({
+      x, y,
+      vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+      life: 0, maxLife: rand(0.4, 0.9),
+      size: rand(2.5, 6), rot: rand(0, TAU), vr: rand(-12, 12),
+      color: hot ? (warm ? "#ffd36b" : "#ff5a3c") : (warm ? "#ffcf6b" : "#9fb0c4"),
+    });
+  }
+}
+// 擦边电弧：玩家与目标之间的青蓝锯齿闪电
+function emitArc(x1, y1, x2, y2, color) {
+  arcs.push({ x1, y1, x2, y2, life: 0, maxLife: 0.18, seed: Math.random() * 1000, color: color || "#aef3ff" });
+}
+// KERS 爆气速度线：屏幕边缘向中心汇聚的射线
+function spawnSpeedLines() {
+  speedLines.length = 0;
+  for (let i = 0; i < 46; i++) {
+    speedLines.push({
+      ang: rand(0, TAU),
+      len: rand(0.18, 0.5),       // 占半屏比例
+      speed: rand(1.6, 3.4),
+      phase: Math.random(),
+      a: 0,
+      cyan: Math.random() < 0.5,
+    });
+  }
+}
+function emitFloater(x, y, text, color) {
+  floaters.push({ x, y, text, color, life: 0, maxLife: 1.1, vy: -46 });
+}
+function emitAirflow(x, y, dirX, dirY) {
+  // 沿车身向后流动的白色气流线
+  const sp = rand(160, 280);
+  airflow.push({
+    x, y,
+    vx: dirX * sp + rand(-20, 20),
+    vy: dirY * sp + rand(-20, 20),
+    life: 0, maxLife: rand(0.18, 0.34),
+  });
+}
+
+/* ---------- 第一关边缘弹球护栏（随弯道中心线偏移） ---------- */
+function bumperRails() {
+  const center = curveAt(Car.y);
+  const right = center + TRACK_EDGE, left = center - TRACK_EDGE;
+  if (Car.x > right) {
+    Car.x = right;
+    if (Car.vx > 0) Car.vx = -Math.abs(Car.vx) * 0.5;  // 向内侧反弹 + 轻微减速
+    addShake(4);
+  } else if (Car.x < left) {
+    Car.x = left;
+    if (Car.vx < 0) Car.vx = Math.abs(Car.vx) * 0.5;
+    addShake(4);
+  }
+}
+
+/* ============================================================
+   镜头辅助
+   ============================================================ */
+function addShake(mag) { Game.shake = Math.min(Game.shake + mag, 70); }
+// 定时屏幕震动：保持至少 intensity 的抖动 duration 秒（用于撞击/爆气等关键事件）
+function screenShake(intensity, duration) {
+  Game.shake = Math.min(Math.max(Game.shake, intensity), 70);
+  Game.shakeHold = Math.max(Game.shakeHold, intensity);
+  Game.shakeHoldT = Math.max(Game.shakeHoldT, duration);
+}
+function triggerHitstop(scale, duration) {
+  Game.timeScale = scale;
+  Game.hitstop = Math.max(Game.hitstop, duration);
+}
+
+/* ============================================================
+   UPDATE —— 纯逻辑
+   ============================================================ */
+function updatePhysics(dt) {
+  // 轨道车物理混合系数 bg：爆发时升至 1，结束后用 BOOST_GRIP_FADE 平滑回落到 0（防瞬间甩尾）
+  const fadeStep = dt / BOOST_GRIP_FADE;
+  Game.boostGrip = Game.boosting
+    ? Math.min(1, Game.boostGrip + fadeStep)
+    : Math.max(0, Game.boostGrip - fadeStep);
+  const bg = Game.boostGrip;
+
+  const steerInput = (keys.left ? -1 : 0) + (keys.right ? 1 : 0);
+  const bp = biomePhys();
+  const steerResp = Car.steerSpeed * bp.steer * (1 - 0.55 * bg);
+  Car.steer = lerp(Car.steer, steerInput, clamp(steerResp * dt, 0, 1));
+
+  // 在【当前车身朝向 yaw】坐标系下分解世界速度：前向(纵)与侧向(横/惯性)
+  const fx = Math.cos(Car.angle), fy = Math.sin(Car.angle);
+  const rx = -Math.sin(Car.angle), ry = Math.cos(Car.angle);
+  let forwardSpeed = Car.vx * fx + Car.vy * fy;   // 纵向速度
+  let lateralSpeed = Car.vx * rx + Car.vy * ry;   // 横向惯性（甩尾的来源）
+  const speedMag = Math.hypot(Car.vx, Car.vy);
+
+  /* --- 引擎/刹车（沿车身朝向施力；爆发时强制最大加速） --- */
+  let drive = 0;
+  if (Game.boosting) {
+    drive += Car.enginePower * 1.7;
+  } else {
+    if (keys.up) drive += Car.enginePower * ACCEL_BOOST;   // 基础加速度 +20%
+    if (keys.down) {
+      if (forwardSpeed > 12) drive -= Car.brakePower;
+      else drive -= Car.reversePower;
+    }
+  }
+  forwardSpeed += drive * dt;
+  const speedCap = Game.boosting ? Car.maxSpeed * BOOST_SPEED_MULT : Car.maxSpeed;
+  forwardSpeed = clamp(forwardSpeed, -Car.maxSpeed * 0.4, speedCap);
+  // 纵向牵引：爆发时混合到 1.0（绝对不打滑/不掉速）
+  forwardSpeed *= lerp(Math.pow(Car.tractionGrip, dt * 60), 1, bg);
+  if (bp.drag > 1 && !keys.up && !Game.boosting && Game.mode === "normal") {
+    forwardSpeed *= Math.pow(1 / bp.drag, dt * 60);
+    if (bp.dragFloor > 0 && forwardSpeed > 0) {
+      forwardSpeed = Math.max(forwardSpeed, Car.maxSpeed * bp.dragFloor);
+    }
+  }
+
+  const handbrake = !!keys.handbrake;
+  const slipAngle = Math.atan2(lateralSpeed, Math.abs(forwardSpeed) + 1e-3);  // 滑动角(rad)
+  const absSlip = Math.abs(slipAngle);
+  const fastEnough = speedMag > Car.maxSpeed * 0.30;
+  const wasDrifting = Car.isDrifting;
+  // 触发：手刹 / 高速大滑动角 / 高速猛打方向且抬油门（lift-off 甩尾）
+  const initiate = (speedMag > 60) && (
+    handbrake ||
+    (fastEnough && absSlip > DRIFT_ENTER_ANGLE) ||
+    (fastEnough && Math.abs(Car.steer) > DRIFT_ENTER_STEER && !keys.up && forwardSpeed > 0)
+  );
+  const sustain = wasDrifting && speedMag > 60 && absSlip > DRIFT_EXIT_ANGLE;
+  // 爆发期间绝对禁止漂移（屏蔽滑角阈值与手刹）：轨道车不侧滑
+  Car.isDrifting = (initiate || sustain) && (!Game.boosting || isBonusStage());
+
+  if (Car.isDrifting && !wasDrifting) AudioManager.playDriftSkid();
+  if (Car.isDrifting && !wasDrifting && speedMag > Car.maxSpeed * 0.6) {
+    triggerHitstop(0.3, 0.18); addShake(7); AudioManager.playGrazeHitstop();
+  }
+
+  /* --- 横向抓地力：漂移时大幅减小（长甩尾），抓地时强力收住 --- */
+  let lateralKeep;
+  if ((Car.isDrifting || handbrake) && !Game.boosting) {
+    let driftGrip = Car.lateralGripDrift;
+    if (bp.driftSlide > 1) driftGrip = Math.pow(driftGrip, 1 / bp.driftSlide);
+    lateralKeep = Math.pow(driftGrip, dt * 60);
+  } else {
+    let g = Car.lateralGripNormal;
+    if (bp.friction < 1) g = Math.pow(g, bp.friction);
+    g = lerp(g, Math.min(g + 0.06, 0.995), clamp(speedMag / Car.maxSpeed, 0, 1) * 0.6);
+    lateralKeep = Math.pow(g, dt * 60);
+    const ga = gripAssist();                                  // 关卡抓地辅助（1/2关更稳）
+    if (ga > 1) lateralKeep = Math.max(1 - (1 - lateralKeep) * ga, 0);
+  }
+  // 【轨道车下压力】爆发时把横向保留率混合到近 0（几乎瞬间消除一切侧滑）
+  if (bg > 0) lateralKeep = lerp(lateralKeep, Math.pow(0.03, dt * 60), bg);
+  const latBefore = lateralSpeed;
+  lateralSpeed *= lateralKeep;
+  // 抓地回收：被刮掉的横向动能部分转为前向，出弯不至于掉速过多
+  const scrub = Math.abs(latBefore) - Math.abs(lateralSpeed);
+  if (forwardSpeed >= 0) forwardSpeed += scrub * GRIP_RECOVERY;
+  forwardSpeed = clamp(forwardSpeed, -Car.maxSpeed * 0.4, speedCap);
+  Car.slip = Math.abs(lateralSpeed);
+
+  /* --- 入弯速度补偿：顺着弯道方向漂移时给予轻微推进，防止掉速被拉开 --- */
+  if (Car.isDrifting && steerInput !== 0 && Game.mode !== "tutorial") {
+    const roadTurn = -curveSlope(Car.y);             // 前进方向为 -y，故取负斜率
+    if (Math.abs(roadTurn) > 0.02 && Math.sign(steerInput) === Math.sign(roadTurn)) {
+      forwardSpeed = clamp(forwardSpeed + Car.maxSpeed * DRIFT_CURVE_ASSIST * dt,
+                           -Car.maxSpeed * 0.4, speedCap * 1.02);
+    }
+  }
+
+  /* --- 偏航(yaw)动力学：方向键转车头 + 自动回正力矩 --- */
+  const dirSign = forwardSpeed >= 0 ? 1 : -1;
+  const turnAuth = clamp(speedMag / TURN_REF_SPEED, 0, 1);    // 低速难转向（需要有速度）
+  // 爆发期转向权限削弱至 40%（只能极小变道微调，不能大角度转弯）
+  const steerScale = 1 - 0.6 * bg;
+  let yawTarget = Car.steer * Car.maxSteer * turnAuth * dirSign * steerScale;
+  // 自动回正(SAT)：把车头朝运动方向拉。抓地时强(稳定好开)，漂移时极弱(允许大甩角→必须反打救车)
+  // 爆发时强制使用抓地级 SAT 并翻倍（轨道级回正：松方向立刻与运动轨迹绝对平行）
+  const satBase = (Car.isDrifting ? SAT_DRIFT : SAT_GRIP) * (1 + bg);
+  const sat = satBase * turnAuth;
+  yawTarget += slipAngle * sat * dirSign;
+  Car.angularVel = lerp(Car.angularVel, yawTarget, clamp(YAW_RESPONSE * (Car.yawSmooth || 1) * dt, 0, 1));
+  Car.angle += Car.angularVel * dt;
+
+  /* --- 用【分解时的旧朝向】重组世界速度：转车头不会瞬间带动速度 → 产生惯性滑动 --- */
+  Car.vx = fx * forwardSpeed + rx * lateralSpeed;
+  Car.vy = fy * forwardSpeed + ry * lateralSpeed;
+  Car.x += Car.vx * dt;
+  Car.y += Car.vy * dt;
+
+  // 渲染/反馈用：车身朝向(新 yaw) 与 实际运动轨迹方向
+  const nfx = Math.cos(Car.angle), nfy = Math.sin(Car.angle);
+  const nrx = -Math.sin(Car.angle), nry = Math.cos(Car.angle);
+  const velAngle = (speedMag > 1) ? Math.atan2(Car.vy, Car.vx) : Car.angle;
+
+  // 【第一关·边缘弹球护栏】撞到赛道左右边界不扣甲/不归零，向内侧轻弹并轻微减速
+  if (currentLevel === 1) bumperRails();
+
+  // 【第二关起·赛道边缘软惩罚】出界不致死，仅强力减速到 40% 极速 + 停止散热
+  Game.offTrack = false;
+  if (currentLevel >= 2 && Game.mode === "normal" && !Game.boosting && !isBonusStage()) {
+    const center = curveAt(Car.y);
+    if (Math.abs(Car.x - center) > TRACK_EDGE) {
+      Game.offTrack = true;
+      const sp = Math.hypot(Car.vx, Car.vy);
+      const lim = Car.maxSpeed * OFFTRACK_SPEED;
+      if (sp > lim) { const k = lerp(1, lim / sp, clamp(10 * dt, 0, 1)); Car.vx *= k; Car.vy *= k; }
+    }
+  }
+  if (Game.offTrack && !Game._offPrev) AudioManager.playOffTrack();   // 进入岩浆区警报
+  Game._offPrev = Game.offTrack;
+
+  /* --- 漂移反馈 --- */
+  if (Car.isDrifting) {
+    const rearX = Car.x - nfx * (Car.length * 0.32);
+    const rearY = Car.y - nfy * (Car.length * 0.32);
+    const halfW = Car.width * 0.42;
+    const intensity = clamp((Car.slip - Car.driftThreshold) / 220, 0.2, 1);
+    // 胎印：方向沿【实际运动轨迹】(velAngle)，而非车头朝向 → 与甩尾轨迹一致
+    emitTireMark(rearX + nrx * halfW, rearY + nry * halfW, 0.55 * intensity + 0.25, velAngle, 4.2);
+    emitTireMark(rearX - nrx * halfW, rearY - nry * halfW, 0.55 * intensity + 0.25, velAngle, 4.2);
+    // 火花：离发热红线越近越亮越多（temp 0→100 放大）
+    const heatBoost = 1 + (Game.temp / 100) * 2;
+    const sparkCount = Math.floor((1 + intensity * 3) * heatBoost);
+    for (let i = 0; i < sparkCount; i++) {
+      emitTrailSpark(rearX + nrx * rand(-halfW, halfW), rearY + nry * rand(-halfW, halfW),
+                     -nfx, -nfy, intensity * (0.8 + heatBoost * 0.2));
+    }
+    addShake(0.5 * intensity + (speedMag / Car.maxSpeed) * 0.6);   // 高速漂移微震（路感）
+    Game.score += (Car.slip * 0.012 + speedMag * 0.004) * Game.multiplier * dt;
+    Game.straightTimer = 0;
+    Game.comboFill += dt;
+    while (Game.comboFill >= 0.4) { Game.comboFill -= 0.4; Game.combo++; }
+  }
+
+  /* --- 爆发尾焰粒子 --- */
+  if (Game.boosting) {
+    const rearX = Car.x - nfx * (Car.length * 0.5);
+    const rearY = Car.y - nfy * (Car.length * 0.5);
+    for (let i = 0; i < 3; i++) {
+      emitSpark(rearX + nrx * rand(-6, 6), rearY + nry * rand(-6, 6),
+                -nfx, -nfy, rand(1.0, 1.8), rand(190, 205), 2.0);
+    }
+  }
+}
+
+/* ---------- 连击结算 ---------- */
+function updateCombo(dt) {
+  if (!Car.isDrifting) {
+    Game.straightTimer += dt;
+    if (Game.straightTimer >= 1.5 && Game.combo > 0) settleCombo();
+  }
+}
+function settleCombo() {
+  const bonus = Game.combo * Game.combo * 25 + Game.combo * 100;
+  Game.score += bonus;
+  emitFloater(Car.x, Car.y - 54, "COMBO x" + Game.combo + "  +" + bonus, "#ffd36b");
+  addShake(6);
+  Game.combo = 0; Game.comboFill = 0;
+}
+
+/* ---------- 倍率衰减 ---------- */
+function updateMultiplier(dt) {
+  if (Game.multTimer > 0) {
+    Game.multTimer -= dt;
+    if (Game.multTimer <= 0) Game.multiplier = 1;
+  }
+}
+
+/* ---------- 热管理（按关卡平滑：1关 0 · 2关 30% · 3关 60% · 4关+ 100%） ---------- */
+function updateThermal(dt) {
+  if (Game.mode === "tutorial") { Game.temp = Math.max(0, Game.temp - 50 * dt); return; }
+  if (isBonusStage()) { Game.temp = 0; return; }
+  if (Game.boosting) { Game.temp = 0; return; }
+
+  // 【越野岩浆区】第二关起出界 -> 发热以 30%/秒 恐怖飙升，逼迫立刻回赛道
+  if (Game.offTrack && Game.mode === "normal" && currentLevel >= 2) {
+    Game.temp = clamp(Game.temp + OFFTRACK_HEAT_RATE * dt, 0, 100);
+    if (Game.temp >= 100) gameOver("越野岩浆熔毁 · OFF-TRACK MELTDOWN");
+    return;
+  }
+
+  const hs = heatScale();
+  let delta = 0;
+  if (keys.up) delta += Car.heatRise * hs;        // 发热速率随关卡缓冲递增
+  if (Car.isDrifting) delta -= Car.heatDrift;     // 散热不打折
+  if (!keys.up && !Car.isDrifting) delta -= Car.heatIdle;
+  // 引导关卡：发热可升可降用于教学，但封顶不熔毁
+  if (Game.mode === "tutorial") { Game.temp = clamp(Game.temp + delta * dt, 0, 96); return; }
+  Game.temp = clamp(Game.temp + delta * dt, 0, 100);
+  if (Game.temp >= 100) gameOver("炉心过热熔毁 · CORE OVERHEAT");
+}
+
+/* ---------- 倒计时 ---------- */
+function updateCountdown(dt) {
+  Game.playTime += dt;
+  Game.timeLeft -= dt;
+  if (Game.timeLeft <= 0) { Game.timeLeft = 0; gameOver("时间耗尽 · TIME OUT"); }
+}
+
+/* ---------- KERS 爆发 ---------- */
+function updateBoost(dt) {
+  if (Game.mode === "tutorial") { Game.boostPrev = keys.boost; return; }
+  if (isBonusStage()) {
+    Game.energy = 100;
+    if (keys.up && !Game.boosting) startBoost();
+    if (Game.boosting) {
+      Game.boostTimer = BOOST_DURATION;
+      Game.energy = 100;
+    }
+    Game.boostPrev = keys.boost;
+    return;
+  }
+  // Shift 边沿：满能量触发
+  if (keys.boost && !Game.boostPrev && Game.energy >= 100 && !Game.boosting) {
+    startBoost();
+  }
+  Game.boostPrev = keys.boost;
+
+  if (Game.boosting) {
+    Game.boostTimer -= dt;
+    if (Game.boostTimer <= 0) Game.boosting = false; // 无敌由 isProtected() 统一判定
+  }
+}
+function startBoost() {
+  Game.boosting = true;
+  Game.boostTimer = BOOST_DURATION;
+  Game.hasBoosted = true;
+  if (!isBonusStage()) Game.energy = 0;
+  Game.temp = 0;
+  // Boost 治疗：自我救赎，回复 1 格装甲（不超过上限）
+  if (Game.armor < MAX_ARMOR) {
+    Game.armor++;
+    emitFloater(Car.x, Car.y - 84, "+1 ARMOR", "#6effa6");
+  }
+  screenShake(28, 0.22);          // 强震：爆气撕裂
+  triggerHitstop(0.35, 0.12);
+  flashWhite();
+  spawnSpeedLines();              // 时空穿梭速度线
+  emitFloater(Car.x, Car.y - 56, "KERS BOOST!", "#aef3ff");
+  AudioManager.playBoost();
+}
+
+/* ---------- 受击无敌计时 ---------- */
+function updateInvinc(dt) {
+  if (Car.invinc > 0 && !Game.boosting) Car.invinc -= dt;
+}
+
+/* ---------- 领航车 + 橡皮筋机制（仅用一维 Y 轴差值） ---------- */
+function updatePace(dt) {
+  Pace.pulse += dt * 5;
+
+  // 一维追击距离：玩家与领航车的纵向差（领航车在上方）
+  const gapY = Car.y - Pace.y;          // >0 表示尚未追上
+  const dx = Car.x - Pace.x;
+
+  // 橡皮筋状态机
+  if (Game.paceSlow) {
+    // 补偿中：追近到 RB_RECOVER_DIST 以内才解除
+    if (gapY <= RB_RECOVER_DIST) Game.paceSlow = false;
+  } else if (gapY > RB_FAR_TRIGGER) {
+    // 被拉开太远 -> 触发补偿
+    Game.paceSlow = true;
+  }
+
+  // 终极怜悯倒计时
+  if (Game.paceMercy > 0) Game.paceMercy -= dt;
+
+  // 计算本帧速度系数
+  let factor;
+  if (Game.offTrack) {
+    // 【怜悯撤销】玩家靠越野“逼停”无效：领航车至少保持 70% 极速直接开走
+    factor = Math.max(paceBaseFactor(), 0.70);
+  } else if (Game.paceMercy > 0) {
+    // 【终极橡皮筋】撞击后 2 秒内领航车几乎踩死刹车（20% 极速）等玩家
+    factor = 0.20;
+  } else if (currentLevel === 1 && Game.playTime < L1_PACE_WAIT_TIME) {
+    // 【第一关·等候机制】开局 5 秒内领航车龟速，几乎在前面等玩家
+    factor = L1_PACE_WAIT_FACTOR;
+  } else if (Game.paceSlow) {
+    factor = RB_SLOW_FACTOR;                 // 强制减速到玩家极速 40%
+  } else {
+    factor = paceBaseFactor();
+    if (gapY < RB_SPRINT_DIST) factor += RB_SPRINT_BONUS;  // 贴近时冲刺，增加紧张感
+  }
+
+  Pace.y -= Car.maxSpeed * factor * dt;      // 持续向上行驶
+  Pace.x = curveAt(Pace.y);                  // 沿赛道中心线随弯道偏移
+
+  Game.targetDist = Math.max(0, Car.y - Pace.y);
+
+  // 追上判定：一维纵向贴近 + 横向不过偏
+  if (gapY < CATCH_RADIUS && Math.abs(dx) < CATCH_RADIUS * 1.6) stageClear();
+}
+function stageClear() {
+  if (Game.state !== "playing") return;
+  Game.state = "over";                  // 冻结物理，进入结算
+  awardCoins(CATCH_COINS);
+  Game.score += 1000;
+
+  // 解锁逻辑：当前关 == 最高已解锁关卡时，解锁下一关
+  let newlyUnlocked = false;
+  if (currentLevel >= PlayerAssets.unlockedStage && currentLevel < MAX_STAGE) {
+    PlayerAssets.unlockedStage = currentLevel + 1;
+    newlyUnlocked = true;
+  }
+
+  // 视听高潮
+  for (let i = 0; i < 50; i++) {
+    emitSpark(Pace.x, Pace.y, rand(-1, 1), rand(-1, 1), rand(0.8, 1.8), rand(140, 160), 1.6);
+  }
+  emitFloater(Car.x, Car.y - 60, "TARGET CAUGHT", "#6effa6");
+  emitFloater(Car.x, Car.y - 32, "+" + CATCH_COINS + " COINS", "#ffd36b");
+  addShake(16);
+  triggerHitstop(0.3, 0.22);
+  flashScreen();
+  AudioManager.playStageClear();
+
+  const sub = newlyUnlocked
+    ? "解锁第 " + PlayerAssets.unlockedStage + " 关 · " + BIOME_NAMES[levelToBiome(PlayerAssets.unlockedStage)]
+    : "返回关卡选择";
+  commitHighScore();
+  saveGame();
+  showResult("STAGE CLEAR", sub, "#6effa6");
+  setTimeout(openLevelSelect, 2200);
+}
+
+/* ---------- 尾流 Slipstream：跟在前车正后方低风险充能 ---------- */
+function inDraft(fx, fy, fw) {
+  const ahead = Car.y - fy;                 // >0 表示前车在上方（前方）
+  return ahead > 0 && ahead < SLIP_Y_RANGE && Math.abs(fx - Car.x) < fw;
+}
+function updateSlipstream(dt) {
+  let drafting = false;
+  // 目标车尾流
+  if (inDraft(Pace.x, Pace.y, 26)) drafting = true;
+  // 路人车尾流
+  if (!drafting) {
+    for (let i = 0; i < traffic.length; i++) {
+      const t = traffic[i];
+      if (inDraft(t.x, t.y, t.w)) { drafting = true; break; }
+    }
+  }
+  if (Game.offTrack) drafting = false;     // 越野断档：尾流也失效
+  Game.slipstream = drafting;
+
+  if (drafting) {
+    Game.energy = clamp(Game.energy + SLIP_ENERGY_RATE * dt, 0, 100);
+    Game.temp = clamp(Game.temp - SLIP_HEAT_RATE * dt, 0, 100);
+    // 车头前侧白色气流线（沿车身向后流动）
+    const nfx = Math.cos(Car.angle), nfy = Math.sin(Car.angle);
+    const nrx = -Math.sin(Car.angle), nry = Math.cos(Car.angle);
+    const frontX = Car.x + nfx * (Car.length * 0.5);
+    const frontY = Car.y + nfy * (Car.length * 0.5);
+    for (let i = 0; i < 2; i++) {
+      const side = (Math.random() < 0.5 ? 1 : -1) * Car.width * 0.5;
+      emitAirflow(frontX + nrx * side, frontY + nry * side, -nfx, -nfy);
+    }
+  }
+}
+
+/* ---------- 混合 KERS 充能：被动低保 + 漂移主动（越野/爆发时断档） ---------- */
+const PASSIVE_CHARGE = 2.5;        // 正常行驶被动充能（%/秒）≈ 40 秒满管
+const DRIFT_CHARGE = 15;           // 赛道内漂移主动充能（%/秒）
+function updateCharge(dt) {
+  if (isBonusStage()) { Game.energy = 100; return; }
+  if (Game.boosting || Game.offTrack) return;   // 越野断档：禁止任何被动/主动充能
+  const rate = Car.isDrifting ? DRIFT_CHARGE : PASSIVE_CHARGE;
+  Game.energy = clamp(Game.energy + rate * dt, 0, 100);
+}
+
+/* ---------- 路面障碍 / Biome 环境 ---------- */
+function updateHazardSpawners(dt) {
+  if (!hazardsUnlocked() || Game.currentBiome !== BIOME.COLD) return;
+  hazardSpawnTimer -= dt;
+  const maxStrips = currentLevel <= 5 ? 1 : 2;
+  if (hazardSpawnTimer <= 0 && roadHazards.length < maxStrips) {
+    spawnEmpStrip();
+    hazardSpawnTimer = rand(currentLevel <= 5 ? 7 : 5, currentLevel <= 5 ? 11 : 8);
+  }
+}
+function updateRoadHazards(dt) {
+  if (Game.state !== "playing") return;
+  for (let i = roadHazards.length - 1; i >= 0; i--) {
+    const h = roadHazards[i];
+    h.x = curveAt(h.y) + (h.relX || 0);
+    h.pulse = (h.pulse || 0) + dt * 6;
+    if (h.y - Car.y > 640) { roadHazards.splice(i, 1); continue; }
+    if (h.type === "emp") handleEmpStrip(h);
+  }
+}
+function handleEmpStrip(h) {
+  const hw = (h.hitW || h.w * 0.8) / 2;
+  const hh = (h.hitH || h.h * 0.8) / 2;
+  const px = clamp(Car.x, h.x - hw, h.x + hw);
+  const py = clamp(Car.y, h.y - hh, h.y + hh);
+  const d = Math.hypot(Car.x - px, Car.y - py);
+  if (d >= deathHitbox() + 2) return;
+  Game.energy = 0;
+  Car.isDrifting = false;
+  Car.slip = 0;
+  const fx = Math.cos(Car.angle), fy = Math.sin(Car.angle);
+  const rx = -Math.sin(Car.angle), ry = Math.cos(Car.angle);
+  let fwd = Car.vx * fx + Car.vy * fy, lat = Car.vx * rx + Car.vy * ry;
+  lat *= 0.15;
+  Car.vx = fx * fwd + rx * lat;
+  Car.vy = fy * fwd + ry * lat;
+  for (let k = 0; k < 24; k++) emitSpark(h.x + rand(-hw, hw), h.y, rand(-1, 1), 0, rand(0.8, 1.5), rand(195, 215), 2);
+  emitFloater(Car.x, Car.y - 40, "EMP DRAIN!", "#5fa8ff");
+  screenShake(12, 0.15);
+  roadHazards.splice(roadHazards.indexOf(h), 1);
+}
+function updateBiomeFx(dt) {
+  if (Game.biomeGlitch > 0) Game.biomeGlitch = Math.max(0, Game.biomeGlitch - dt);
+  if (Game.state !== "playing" || Game.mode === "tutorial") return;
+  const b = Game.currentBiome;
+  if (b === BIOME.FURNACE && Math.random() < 0.35) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    biomeParticles.push({
+      x: Car.x + side * (TRACK_EDGE + rand(20, 80)), y: Car.y - rand(40, VIEW_H * 0.6),
+      vx: -side * rand(40, 140), vy: rand(60, 200),
+      life: 0, maxLife: rand(0.35, 0.75), hue: rand(12, 35), size: rand(2, 5),
+    });
+    if (biomeParticles.length > 100) biomeParticles.shift();
+  } else if (b === BIOME.WASTELAND && Math.random() < 0.5) {
+    biomeParticles.push({
+      x: Car.x + rand(-VIEW_W * 0.6, VIEW_W * 0.6), y: Car.y - rand(0, VIEW_H * 0.8),
+      vx: rand(-120, 120), vy: rand(40, 180),
+      life: 0, maxLife: rand(0.5, 1.2), hue: 42, size: rand(3, 9), sand: true,
+    });
+    if (biomeParticles.length > 80) biomeParticles.shift();
+  } else if (b === BIOME.VAULT && Math.random() < 0.72) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    biomeParticles.push({
+      x: Car.x + side * (TRACK_EDGE + rand(8, 64)), y: Car.y - rand(20, VIEW_H * 0.65),
+      vx: -side * rand(60, 200), vy: rand(80, 260),
+      life: 0, maxLife: rand(0.28, 0.65), hue: rand(44, 58), size: rand(2.5, 7), gold: true,
+    });
+    if (biomeParticles.length > 140) biomeParticles.shift();
+  }
+  for (let i = biomeParticles.length - 1; i >= 0; i--) {
+    const p = biomeParticles[i];
+    p.life += dt;
+    if (p.life >= p.maxLife) biomeParticles.splice(i, 1);
+    else { p.x += p.vx * dt; p.y += p.vy * dt; }
+  }
+}
+function juggernautTakedown(t, dx, dy, dist, cx, cy) {
+  for (let i = 0; i < 48; i++) emitSpark(cx, cy, dx / (dist || 1), dy / (dist || 1), rand(1, 2.2), rand(0, 25), 2.2);
+  emitDebris(cx, cy, dx / (dist || 1), dy / (dist || 1), 32, true);
+  emitFloater(cx, cy - 36, "JUGGERNAUT!", "#ff6b3c");
+  Game.score += 2250;
+  Game.combo += 4;
+  Game.multiplier = 5; Game.multTimer = 2.2;
+  awardCoins(25);
+  triggerHitstop(0.25, 0.22);
+  screenShake(28, 0.35);
+  flashWhite();
+  spawnObstacle(t);
+}
+
+const TICK_HOMING_GAIN = 0.58;   // 废土自爆车横向追踪（较原版下调约 35%）
+const TICK_HOMING_CLAMP = 58;
+
+function resolveTickFriendlyFire() {
+  for (let i = 0; i < traffic.length; i++) {
+    const tick = traffic[i];
+    if (tick.type !== "tick_bomber") continue;
+    for (let j = i + 1; j < traffic.length; j++) {
+      const other = traffic[j];
+      const dx = other.x - tick.x, dy = other.y - tick.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist >= tick.r + other.r) continue;
+      const mx = (tick.x + other.x) / 2, my = (tick.y + other.y) / 2;
+      const nx = dx / (dist || 1), ny = dy / (dist || 1);
+      for (let k = 0; k < 32; k++) {
+        emitSpark(mx, my, nx + rand(-0.4, 0.4), ny + rand(-0.4, 0.4), rand(1, 2), rand(0, 22), 2);
+      }
+      emitDebris(mx, my, nx, ny, 22, true);
+      emitFloater(mx, my - 24, "CHAIN BLAST!", "#ff8040");
+      screenShake(12, 0.14);
+      spawnObstacle(tick);
+      spawnObstacle(other);
+    }
+  }
+}
+
+/* ---------- 路人车流：滚动 / 擦边 / 碰撞 / 回收 ---------- */
+function updateTraffic(dt) {
+  const highLevel = currentLevel >= 5 || isBonusStage();
+  for (let i = 0; i < traffic.length; i++) {
+    const t = traffic[i];
+    t.y += t.speed * dt;          // 向下滚动
+    t.laneX += t.drift * dt;      // 车道内横向漂移
+    t.laneX = clamp(t.laneX, -COURSE_HALF * 0.92, COURSE_HALF * 0.92);
+    // 高等级偶尔轻微变道：周期性重选横向漂移目标，幅度随关卡增大
+    if (highLevel && t.type === "normal") {
+      t.laneTimer -= dt;
+      if (t.laneTimer <= 0) {
+        const dr = trafficDriftRange();
+        t.drift = rand(-dr, dr);
+        t.laneTimer = rand(2, 4.5);
+      }
+    }
+    if (t.type === "tick_bomber" && t.homing) {
+      t.laneX += clamp((Car.x - t.x) * TICK_HOMING_GAIN, -TICK_HOMING_CLAMP, TICK_HOMING_CLAMP) * dt;
+      t.laneX = clamp(t.laneX, -COURSE_HALF * 0.92, COURSE_HALF * 0.92);
+      t.pulse = (t.pulse || 0) + dt * 14;
+    }
+    t.x = curveAt(t.y) + t.laneX; // 世界 X 随弯道中心线偏移
+    if (t.grazeCD > 0) t.grazeCD -= dt;
+
+    const dx = t.x - Car.x, dy = t.y - Car.y;
+    const dist = Math.hypot(dx, dy);
+
+    // 已驶过玩家下方较远 / 车道偏出 / 闯入减速弯净空区 -> 回收到前方
+    if (t.y - Car.y > 520 || Math.abs(t.laneX) > COURSE_HALF * 1.1 || dist > 1600 ||
+        (currentLevel >= 2 && t.y < Car.y && nearChicane(t.y))) {
+      spawnTrafficCar(t);
+      continue;
+    }
+
+    const gap = dist - deathHitbox() - t.r;
+
+    const canGraze = gap < grazeReach() && Car.isDrifting && t.grazeCD <= 0 && t.type === "normal";
+    if (canGraze && isBonusStage()) {
+      doGraze(t, dx, dy, dist);
+      continue;
+    }
+
+    // 爆发无敌：直接撞飞路人车
+    if (Game.boosting && gap < 6) {
+      smashTraffic(t, dx, dy, dist);
+      continue;
+    }
+
+    if (isProtected()) continue;  // 受击无敌期间：不碰撞、不擦边
+
+    if (gap < 0) {
+      const inv = 1 / (dist || 1);
+      const ndx = dx * inv, ndy = dy * inv;
+      const fxh = Math.cos(Car.angle), fyh = Math.sin(Car.angle);
+      const rxh = -Math.sin(Car.angle), ryh = Math.cos(Car.angle);
+      const localF = ndx * fxh + ndy * fyh;
+      const localR = ndx * rxh + ndy * ryh;
+      const contactAngle = Math.abs(Math.atan2(localR, localF));
+      const spd = Math.hypot(Car.vx, Car.vy);
+      const tailwhipMinSpd = isBonusStage() ? 60 : 120;
+      const tailwhipArmed = (Car.isDrifting || (isBonusStage() && Game.boosting)) && spd > tailwhipMinSpd;
+      const lateralSpeed = Car.vx * rxh + Car.vy * ryh;
+      const sweeping = tailwhipArmed && Math.abs(lateralSpeed) > 80 &&
+                       Math.sign(lateralSpeed) === Math.sign(localR);
+      const sectorRad = (sweeping ? 25 : 35) * Math.PI / 180;
+      const cx = Car.x + ndx * Car.radius, cy = Car.y + ndy * Car.radius;
+
+      if (t.type === "juggernaut") {
+        const canSmash = (Car.takedownPower || 5) >= 7 || Game.boosting || spd > Car.maxSpeed * 0.82;
+        if (tailwhipArmed && contactAngle > sectorRad) juggernautTakedown(t, dx, dy, dist, cx, cy);
+        else if (canSmash && Game.boosting) { smashTraffic(t, dx, dy, dist); Game.score += 1800; }
+        else {
+          Car.vx *= 0.22; Car.vy *= 0.22;
+          hitArmor();
+          emitFloater(Car.x, Car.y - 50, "BLOCKED!", "#ff5a3c");
+          screenShake(20, 0.25);
+        }
+        continue;
+      }
+      if (t.type === "tick_bomber") {
+        if (tailwhipArmed && contactAngle > sectorRad) tailwhipTakedown(t, dx, dy, dist, cx, cy);
+        else {
+          for (let k = 0; k < 36; k++) emitSpark(t.x, t.y, rand(-1, 1), rand(-1, 1), rand(1, 2), rand(0, 20), 2);
+          emitDebris(t.x, t.y, ndx, ndy, 22, true);
+          screenShake(24, 0.3); flashWhite();
+          if (Game.armor > 0) {
+            Game.armor = Math.max(0, Game.armor - 2);
+            Car.invinc = INVINC_TIME;
+            Car.vx *= 0.1; Car.vy *= 0.1;
+            emitFloater(Car.x, Car.y - 50, "-2 ARMOR", "#ff2d4d");
+            if (Game.armor <= 0) crashMeltdown();
+          }
+          emitFloater(t.x, t.y, "BOOM!", "#ff2d4d");
+          spawnObstacle(t);
+        }
+        continue;
+      }
+      if (tailwhipArmed && contactAngle > sectorRad) {
+        tailwhipTakedown(t, dx, dy, dist, cx, cy);
+        continue;
+      }
+      hitArmor();
+      return;
+    }
+
+    if (gap < grazeReach() && Car.isDrifting && t.grazeCD <= 0 && t.type === "normal") {
+      doGraze(t, dx, dy, dist);
+    }
+  }
+  resolveTickFriendlyFire();
+}
+
+function smashTraffic(t, dx, dy, dist) {
+  const nx = dx / (dist || 1), ny = dy / (dist || 1);
+  for (let i = 0; i < 24; i++) {
+    emitSpark(t.x, t.y, nx, ny, rand(0.8, 1.8), rand(190, 205), 1.8);
+  }
+  emitDebris(t.x, t.y, nx, ny, 16, false);     // 灰/金属碎片飞溅
+  emitFloater(t.x, t.y, "SMASH!", "#aef3ff");
+  screenShake(11, 0.18);
+  spawnTrafficCar(t);
+}
+
+/* ---------- 甩尾击飞（侧面武器区）：火花对齐实际碰撞点 ---------- */
+function tailwhipTakedown(t, dx, dy, dist, cx, cy) {
+  const nx = dx / (dist || 1), ny = dy / (dist || 1);
+  // 碎片/火花从碰撞点沿“击飞方向”爆开（玩家用侧面把 NPC 干碎）
+  for (let i = 0; i < 22; i++) {
+    emitSpark(cx, cy, nx, ny, rand(0.9, 1.9), rand(40, 60), 1.9);
+  }
+  emitDebris(cx, cy, nx, ny, 18, true);          // 红黄碎片
+  emitArc(Car.x, Car.y, cx, cy, "#ffd36b");
+  emitFloater(cx, cy - 30, "TAKEDOWN!", "#ffd36b");
+
+  const pay = bonusPayoutMult();
+  Game.score += 450 * pay;
+  Game.combo += 2;
+  Game.multiplier = 5; Game.multTimer = 1.6;
+  Game.straightTimer = 0;
+  awardCoins(GRAZE_COINS * pay);
+  if (t.type === "tick_bomber") {
+    Game.energy = 100;
+    emitFloater(cx, cy - 48, "KERS MAX!", "#aef3ff");
+    if (!Game.offTrack) Game.temp = clamp(Game.temp - GRAZE_HEAT_RELIEF * 0.6, 0, 100);
+  } else if (!Game.offTrack) {
+    Game.energy = clamp(Game.energy + 20, 0, 100);
+    Game.temp = clamp(Game.temp - GRAZE_HEAT_RELIEF * 0.6, 0, 100);
+  }
+
+  triggerHitstop(0.3, 0.16);
+  screenShake(14 * (Car.tailwhipShakeMult || 1), 0.18);
+  flashWhite();
+  AudioManager.playGrazeHitstop();
+  spawnTrafficCar(t);
+}
+
+function doGraze(t, dx, dy, dist) {
+  t.grazeCD = 0.6;
+  const pay = bonusPayoutMult();
+  Game.multiplier = 5;
+  Game.multTimer = 1.6;
+  Game.score += 500 * pay;
+  Game.combo += 3;
+  Game.straightTimer = 0;
+
+  // KERS 充能：每次擦边稳定 +35（3 次即可开大招回血）·越野断档不充能
+  const grazeEnergy = 35;
+  if (!Game.offTrack) {
+    Game.energy = clamp(Game.energy + grazeEnergy, 0, 100);
+    Game.temp = clamp(Game.temp - GRAZE_HEAT_RELIEF, 0, 100);
+  }
+  const coinGain = GRAZE_COINS * pay;
+  awardCoins(coinGain);
+
+  // 紫蓝电弧 + 玩家↔路人车之间的青蓝闪电连线
+  const nx = dx / (dist || 1), ny = dy / (dist || 1);
+  for (let i = 0; i < 40; i++) {
+    emitSpark(t.x - nx * t.r, t.y - ny * t.r, -nx, -ny, rand(0.8, 1.6), rand(255, 285), 1.8);
+  }
+  emitArc(Car.x, Car.y, t.x, t.y, "#aef3ff");
+  emitFloater((t.x + Car.x) / 2, (t.y + Car.y) / 2,
+    "GRAZE! +" + grazeEnergy + "⚡ +" + coinGain + "◎" + (pay > 1 ? " x2" : ""), "#c79bff");
+
+  triggerHitstop(0.3, 0.2);
+  screenShake(13, 0.16);          // 中震
+  flashWhite();                   // 强烈白光闪烁
+  AudioManager.playGrazeHitstop();
+}
+
+/* ============================================================
+   减速弯 Chicanes —— 占据 60% 赛道宽的巨型横向路障（第二关起）
+   玩家直线必撞，必须利用漂移侧滑从缝隙中高速穿过
+   ============================================================ */
+let chicaneTimer = 2.5;
+// 减速弯占道比例：35% 起，随关卡缓升，封顶 45%
+function chicaneFrac() { return clamp(0.35 + (currentLevel - 2) * 0.02, 0.35, 0.45); }
+function spawnChicane() {
+  const blockW = chicaneFrac() * (TRACK_EDGE * 2);   // 占整条赛道宽的比例
+  const side = Math.random() < 0.5 ? -1 : 1;         // 贴左 / 贴右
+  const relX = side < 0 ? (-TRACK_EDGE + blockW / 2) : (TRACK_EDGE - blockW / 2);
+  chicanes.push({
+    y: Car.y - rand(880, 1150),
+    relX, x: 0, w: blockW, h: 44, grazeCD: 0, hit: false,
+  });
+}
+function updateChicanes(dt) {
+  if (currentLevel < 4 || currentLevel === 10 || Game.mode !== "normal") { chicanes.length = 0; return; }
+  chicaneTimer -= dt;
+  if (chicaneTimer <= 0 && chicanes.length < 3) {
+    spawnChicane();
+    chicaneTimer = rand(3.4, 5.2);            // 间隔（足够玩家调整入弯线路）
+  }
+  for (let i = chicanes.length - 1; i >= 0; i--) {
+    const c = chicanes[i];
+    c.x = curveAt(c.y) + c.relX;              // 随弯道中心线偏移
+    if (c.grazeCD > 0) c.grazeCD -= dt;
+    if (c.y - Car.y > 620) { chicanes.splice(i, 1); continue; }
+    handleChicane(c);
+  }
+}
+function handleChicane(c) {
+  // 圆（玩家致死碰撞框）对 AABB（路障）最近点判定
+  const hw = c.w / 2, hh = c.h / 2;
+  const px = clamp(Car.x, c.x - hw, c.x + hw);
+  const py = clamp(Car.y, c.y - hh, c.y + hh);
+  const ddx = Car.x - px, ddy = Car.y - py;
+  const d = Math.hypot(ddx, ddy);
+  const r = deathHitbox();
+
+  if (Game.boosting && d < r + 6) {           // 爆发无敌：撞碎路障
+    c.hit = true;
+    const nx = ddx / (d || 1), ny = ddy / (d || 1);
+    for (let k = 0; k < 30; k++) emitSpark(px, py, nx, ny, rand(0.9, 1.9), rand(0, 30), 1.8);
+    emitDebris(c.x, c.y, nx, ny, 28, true);   // 红黄装甲碎片爆飞
+    emitFloater(c.x, c.y, "BREAK!", "#aef3ff");
+    screenShake(16, 0.2);
+    flashWhite();
+    const idx = chicanes.indexOf(c);
+    if (idx >= 0) chicanes.splice(idx, 1);
+    return;
+  }
+  if (isProtected()) return;
+  if (d < r) { hitArmor(); return; }          // 直线撞墙 -> 扣甲
+
+  // 贴着缝隙边缘漂移穿过 -> 擦边充能奖励
+  if (d < r + grazeReach() && Car.isDrifting && c.grazeCD <= 0 && !Game.offTrack) {
+    c.grazeCD = 1.0;
+    const grazeEnergy = 40;            // 减速弯擦边更暴利
+    Game.energy = clamp(Game.energy + grazeEnergy, 0, 100);
+    Game.temp = clamp(Game.temp - GRAZE_HEAT_RELIEF, 0, 100);
+    Game.multiplier = 5; Game.multTimer = 1.6;
+    Game.score += 700; Game.combo += 4; Game.straightTimer = 0;
+    awardCoins(GRAZE_COINS);
+    const nx = ddx / (d || 1), ny = ddy / (d || 1);
+    for (let k = 0; k < 46; k++) emitSpark(px, py, nx, ny, rand(0.8, 1.6), rand(255, 285), 1.9);
+    emitArc(Car.x, Car.y, px, py, "#aef3ff");
+    emitFloater(Car.x, Car.y - 44, "CHICANE GRAZE! +" + grazeEnergy + "⚡", "#c79bff");
+    triggerHitstop(0.3, 0.2); screenShake(13, 0.16); flashWhite();
+    AudioManager.playGrazeHitstop();
+  }
+}
+
+/* ---------- 装甲受击 ---------- */
+function hitArmor() {
+  if (Game.armor <= 0) { crashMeltdown(); return; }
+  Game.armor--;
+  Car.vx = 0; Car.vy = 0;        // 瞬间清空速度
+  Car.invinc = INVINC_TIME;      // 闪烁无敌
+  Game.paceSlow = true;          // 橡皮筋补偿：失误后领航车强制减速，给玩家追回希望
+  Game.paceMercy = 2;            // 终极怜悯：领航车立刻降至 20% 极速，持续 2 秒等玩家
+  Game.combo = 0; Game.comboFill = 0;
+  screenShake(34, 0.26);          // 强震：撞击撕裂感
+  triggerHitstop(0.15, 0.16);
+  flashBurn();
+  for (let i = 0; i < 40; i++) {
+    emitSpark(Car.x, Car.y, rand(-1, 1), rand(-1, 1), rand(0.8, 1.8), rand(8, 36), 1.5);
+  }
+  emitDebris(Car.x, Car.y, 0, -1, 26, true);   // 红黄装甲碎片四溅
+  emitFloater(Car.x, Car.y - 50, "-1 ARMOR", "#ff6b6b");
+  AudioManager.playArmorHit();
+}
+function crashMeltdown() {
+  addShake(48);
+  triggerHitstop(0.12, 0.2);
+  for (let i = 0; i < 70; i++) {
+    emitSpark(Car.x, Car.y, rand(-1, 1), rand(-1, 1), rand(0.8, 2), rand(8, 36), 1.6);
+  }
+  gameOver("装甲耗尽 · COLLISION MELTDOWN");
+}
+
+function gameOver(reason) {
+  if (Game.state === "over") return;
+  Game.state = "over";
+  Game.overReason = reason;
+  commitHighScore();
+  saveGame();
+  AudioManager.playMeltdown();
+  showOver();
+}
+
+/* ---------- 粒子寿命 ---------- */
+function updateParticles(dt) {
+  for (let i = 0; i < tireMarks.length; i++) tireMarks[i].a -= dt * 0.18;
+  while (tireMarks.length && tireMarks[0].a <= 0) tireMarks.shift();
+
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const s = sparks[i];
+    s.life += dt;
+    if (s.life >= s.maxLife) { sparks.splice(i, 1); continue; }
+    const beh = s.behavior || "default";
+    if (beh === "gold_sparks" && s.bounce > 0) {
+      // 金色火花：落地弹跳两次
+      s.vy += 520 * dt;
+      s.vx *= Math.pow(0.55, dt);
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      if (s.y > (s.groundY != null ? s.groundY : Car.y + 8) && s.vy > 0) {
+        s.y = s.groundY != null ? s.groundY : Car.y + 8;
+        s.vy = -Math.abs(s.vy) * 0.42;
+        s.bounce--;
+      }
+    } else if (beh === "frequency") {
+      s.glitchT += dt * 48;
+      s.vx *= Math.pow(0.18, dt);
+      s.vy *= Math.pow(0.18, dt);
+      s.x += s.vx * dt + Math.sin(s.glitchT * 3.1) * 14 * dt;
+      s.y += s.vy * dt + Math.cos(s.glitchT * 2.7) * 14 * dt;
+    } else if (beh === "frost") {
+      const t = s.life / s.maxLife;
+      s.size = (s.baseSize || s.size) * (1 + t * 1.8);
+      s.vx *= Math.pow(0.06, dt);
+      s.vy *= Math.pow(0.06, dt);
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+    } else if (beh === "plasma" || beh === "rotary") {
+      s.prevX = s.x; s.prevY = s.y;
+      s.vx *= Math.pow(beh === "rotary" ? 0.06 : 0.04, dt);
+      s.vy *= Math.pow(beh === "rotary" ? 0.06 : 0.04, dt);
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+    } else if (beh === "aero") {
+      s.vx *= Math.pow(0.08, dt);
+      s.vy *= Math.pow(0.08, dt);
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+    } else if (beh === "heat") {
+      const t = s.life / s.maxLife;
+      s.size = (s.baseSize || s.size) * (1 + Math.sin(t * Math.PI) * 1.2);
+      s.vx *= Math.pow(0.14, dt);
+      s.vy *= Math.pow(0.14, dt);
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+    } else if (beh === "biomech") {
+      s.glitchT += dt * 36;
+      s.vx *= Math.pow(0.12, dt);
+      s.vy *= Math.pow(0.12, dt);
+      s.size = (s.baseSize || s.size) * (1 + s.life / s.maxLife * 0.8);
+      s.x += s.vx * dt + Math.sin(s.glitchT) * 10 * dt;
+      s.y += s.vy * dt;
+    } else if (beh === "sparks") {
+      s.vy += 180 * dt;
+      s.vx *= Math.pow(0.2, dt);
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+    } else {
+      s.vx *= Math.pow(0.12, dt);
+      s.vy *= Math.pow(0.12, dt);
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+    }
+  }
+  for (let i = floaters.length - 1; i >= 0; i--) {
+    const f = floaters[i];
+    f.life += dt;
+    if (f.life >= f.maxLife) { floaters.splice(i, 1); continue; }
+    f.y += f.vy * dt;
+    f.vy *= Math.pow(0.5, dt);
+  }
+  for (let i = airflow.length - 1; i >= 0; i--) {
+    const a = airflow[i];
+    a.life += dt;
+    if (a.life >= a.maxLife) { airflow.splice(i, 1); continue; }
+    a.x += a.vx * dt;
+    a.y += a.vy * dt;
+  }
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const d = debris[i];
+    d.life += dt;
+    if (d.life >= d.maxLife) { debris.splice(i, 1); continue; }
+    d.vx *= Math.pow(0.22, dt);
+    d.vy *= Math.pow(0.22, dt);
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+    d.rot += d.vr * dt;
+  }
+  for (let i = arcs.length - 1; i >= 0; i--) {
+    arcs[i].life += dt;
+    if (arcs[i].life >= arcs[i].maxLife) arcs.splice(i, 1);
+  }
+  // KERS 速度线：随 Boost 状态淡入，结束后淡出
+  for (let i = speedLines.length - 1; i >= 0; i--) {
+    const L = speedLines[i];
+    L.phase += dt * L.speed;
+    if (Game.boosting) L.a = Math.min(1, L.a + dt * 6);
+    else L.a -= dt * 3;
+    if (L.a <= 0) speedLines.splice(i, 1);
+  }
+}
+
+/* ---------- 镜头更新 ---------- */
+function updateCamera(dt) {
+  Game.shake = lerp(Game.shake, 0, clamp(12 * dt, 0, 1));
+  // 定时震动：在持续期内维持一个抖动下限
+  if (Game.shakeHoldT > 0) {
+    Game.shakeHoldT -= dt;
+    Game.shake = Math.max(Game.shake, Game.shakeHold);
+    if (Game.shakeHoldT <= 0) Game.shakeHold = 0;
+  }
+  if (Game.shake < 0.05) Game.shake = 0;
+  Game.shakeX = rand(-1, 1) * Game.shake;
+  Game.shakeY = rand(-1, 1) * Game.shake;
+}
+
+/* ============================================================
+   DRAW —— 纯渲染
+   ============================================================ */
+function draw() {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+
+  if (Game.state === "garage") {
+    ctx.save();
+    ctx.translate(Game.shakeX, Game.shakeY);
+    drawGarageScene();
+    ctx.restore();
+    return;
+  }
+
+  const camX = Car.x - VIEW_W / 2 + Game.shakeX;
+  const camY = Car.y - VIEW_H / 2 + Game.shakeY;
+
+  drawBiomeBackground(camX, camY);
+
+  ctx.save();
+  ctx.translate(-camX, -camY);
+  drawBiomeLanes(camY);
+  drawBiomeRails(camY);
+  drawBiomeParticles();
+  drawTireMarks();
+  if (Game.mode === "tutorial") {
+    drawTutObstacles();
+  } else {
+    drawRoadHazards();
+    drawChicanes();
+    drawTraffic();
+    drawPace();
+  }
+  drawDebris();
+  drawSparks();
+  drawArcs();
+  drawAirflow();
+  drawCar();
+  drawFloaters();
+  ctx.restore();
+
+  if (Game.boosting || speedLines.length) drawSpeedLines();
+  if (Game.mode !== "tutorial") drawTargetArrow(camX, camY);
+  if (Game.biomeGlitch > 0) drawBiomeGlitchOverlay();
+  drawVignette();
+  if (Game.state === GameState.PAUSED) drawPauseOverlay();
+}
+
+function drawPauseOverlay() {
+  pauseMenuRects = {};
+  ctx.save();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  const cx = VIEW_W / 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "900 26px Consolas, 'Segoe UI', monospace";
+  ctx.fillStyle = "#00e5ff";
+  ctx.shadowColor = "rgba(0,229,255,0.85)";
+  ctx.shadowBlur = 22;
+  ctx.fillText("SYSTEM OVERRIDE // 暂停", cx, VIEW_H * 0.36);
+  ctx.shadowBlur = 0;
+
+  const items = [
+    { id: "resume", label: "[ RESUME / 继续任务 ]", y: VIEW_H * 0.52, stroke: "rgba(0,229,255,0.45)", fill: "#aef3ff" },
+    { id: "abort", label: "[ ABORT MISSION / 放弃任务 ]", y: VIEW_H * 0.62, stroke: "rgba(255,45,77,0.5)", fill: "#ff8a9a" },
+  ];
+  ctx.font = "800 14px Consolas, 'Segoe UI', monospace";
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const tw = ctx.measureText(item.label).width;
+    const w = tw + 52, h = 42;
+    const x = cx - w / 2, y = item.y - h / 2;
+    pauseMenuRects[item.id] = { x: x, y: y, w: w, h: h };
+    ctx.fillStyle = "rgba(8,12,20,0.88)";
+    rrect(x, y, w, h, 7);
+    ctx.fill();
+    ctx.strokeStyle = item.stroke;
+    ctx.lineWidth = 1.5;
+    rrect(x, y, w, h, 7);
+    ctx.stroke();
+    ctx.fillStyle = item.fill;
+    ctx.fillText(item.label, cx, item.y);
+  }
+  ctx.font = "600 11px Consolas, monospace";
+  ctx.fillStyle = "#5a6680";
+  ctx.fillText("ESC · 继续  |  B · 放弃", cx, VIEW_H * 0.74);
+  ctx.restore();
+}
+
+function drawBiomeGlitchOverlay() {
+  const t = Game.biomeGlitch;
+  if (t <= 0) return;
+  ctx.save();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = "rgba(255,255,255," + (t * 0.35).toFixed(3) + ")";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.restore();
+}
+
+function drawGridZero(camX, camY) {
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const cx = VIEW_W / 2, horizon = VIEW_H * 0.38;
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 1;
+  for (let i = -10; i <= 10; i++) {
+    ctx.beginPath();
+    ctx.moveTo(cx + i * 90, VIEW_H);
+    ctx.lineTo(cx + i * 6, horizon);
+    ctx.stroke();
+  }
+  const scroll = (camY * 0.2) % 36;
+  for (let row = 0; row < 14; row++) {
+    const yy = horizon + row * 36 + scroll;
+    if (yy > VIEW_H) continue;
+    const t = (yy - horizon) / (VIEW_H - horizon);
+    ctx.beginPath();
+    ctx.moveTo(cx - VIEW_W * (0.08 + t * 0.46), yy);
+    ctx.lineTo(cx + VIEW_W * (0.08 + t * 0.46), yy);
+    ctx.stroke();
+  }
+}
+
+function drawBiomeBackground(camX, camY) {
+  if (Game.mode === "tutorial") { drawGridZero(camX, camY); return; }
+  const b = Game.currentBiome;
+  ctx.fillStyle = b === BIOME.VAULT ? "#0c0a02"
+    : (b === BIOME.COLD ? "#02060c" : (b === BIOME.WASTELAND ? "#0a0804" : "#040306"));
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  if (b === BIOME.VAULT) {
+    const lg = ctx.createLinearGradient(0, 0, VIEW_W * 0.32, 0);
+    lg.addColorStop(0, "rgba(255,210,40,0.55)");
+    lg.addColorStop(0.45, "rgba(255,180,20,0.18)");
+    lg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = lg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    const rg = ctx.createLinearGradient(VIEW_W, 0, VIEW_W * 0.68, 0);
+    rg.addColorStop(0, "rgba(255,210,40,0.55)");
+    rg.addColorStop(0.45, "rgba(255,180,20,0.18)");
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    const vg = ctx.createRadialGradient(VIEW_W / 2, VIEW_H * 0.42, 40, VIEW_W / 2, VIEW_H * 0.42, VIEW_H * 0.75);
+    vg.addColorStop(0, "rgba(255,230,120,0.12)");
+    vg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  } else if (b === BIOME.FURNACE) {
+    const lg = ctx.createLinearGradient(0, 0, VIEW_W * 0.28, 0);
+    lg.addColorStop(0, "rgba(140,25,12,0.42)");
+    lg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = lg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    const rg = ctx.createLinearGradient(VIEW_W, 0, VIEW_W * 0.72, 0);
+    rg.addColorStop(0, "rgba(140,25,12,0.42)");
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg; ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  } else if (b === BIOME.COLD) {
+    ctx.fillStyle = "rgba(0,80,140,0.08)";
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    for (let i = 0; i < 6; i++) {
+      const py = ((camY * 0.15 + i * 110) % VIEW_H);
+      ctx.globalAlpha = 0.06 + i * 0.01;
+      ctx.fillStyle = "#5fa8ff";
+      ctx.fillRect(0, py, VIEW_W, 18 + i * 4);
+    }
+    ctx.globalAlpha = 1;
+  } else if (b === BIOME.WASTELAND) {
+    ctx.fillStyle = "rgba(180,140,40,0.06)";
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  } else {
+    drawGrid(camX, camY);
+  }
+}
+
+function drawBiomeParticles() {
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 0; i < biomeParticles.length; i++) {
+    const p = biomeParticles[i];
+    const t = 1 - p.life / p.maxLife;
+    if (p.sand) {
+      ctx.fillStyle = "rgba(220,180,60," + (t * 0.35).toFixed(3) + ")";
+      ctx.fillRect(p.x, p.y, p.size, p.size * 0.4);
+    } else if (p.gold) {
+      ctx.shadowColor = "rgba(255,230,80,0.95)";
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = "hsla(" + p.hue + ",100%,62%," + (t * 0.95).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * (0.6 + t * 0.8), 0, TAU); ctx.fill();
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = "hsla(" + p.hue + ",100%,55%," + (t * 0.8).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * t, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawBiomeLanes(camY) {
+  if (Game.mode === "tutorial") return;
+  drawLaneLines(camY);
+}
+function drawBiomeRails(camY) {
+  if (Game.mode === "tutorial") return;
+  drawRails(camY);
+}
+
+function drawRoadHazards() {
+  for (let i = 0; i < roadHazards.length; i++) {
+    const h = roadHazards[i];
+    if (h.type !== "emp") continue;
+    const pulse = 0.5 + 0.5 * Math.sin(h.pulse || 0);
+    ctx.save();
+    ctx.translate(h.x, h.y);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(80,180,255," + (0.12 + pulse * 0.15).toFixed(3) + ")";
+    rrect(-h.w / 2, -h.h / 2, h.w, h.h, 4); ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = "rgba(120,220,255,0.85)";
+    ctx.lineWidth = 2;
+    rrect(-h.w / 2, -h.h / 2, h.w, h.h, 4); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/* ---------- 减速弯路障（深红条块 + 危险斜纹） ---------- */
+function drawChicanes() {
+  for (let i = 0; i < chicanes.length; i++) {
+    const c = chicanes[i];
+    ctx.save();
+    ctx.translate(c.x, c.y);
+    // 外发光
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(200,20,40,0.18)";
+    rrect(-c.w / 2 - 6, -c.h / 2 - 6, c.w + 12, c.h + 12, 8); ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+    // 主体
+    ctx.shadowColor = "rgba(255,30,55,0.85)";
+    ctx.shadowBlur = 18;
+    ctx.fillStyle = "#5c0b16";
+    ctx.strokeStyle = "#ff2d4d";
+    ctx.lineWidth = 2.5;
+    rrect(-c.w / 2, -c.h / 2, c.w, c.h, 6); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    // 危险斜纹
+    ctx.save();
+    rrect(-c.w / 2, -c.h / 2, c.w, c.h, 6); ctx.clip();
+    ctx.strokeStyle = "rgba(255,196,60,0.5)";
+    ctx.lineWidth = 7;
+    for (let sx = -c.w / 2 - c.h; sx < c.w / 2; sx += 26) {
+      ctx.beginPath(); ctx.moveTo(sx, c.h / 2); ctx.lineTo(sx + c.h, -c.h / 2); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+}
+
+function drawTutObstacles() {
+  for (let i = 0; i < tutObstacles.length; i++) {
+    const o = tutObstacles[i];
+    if (!o.alive) continue;
+    o.pulse += 0.08;
+    const glow = 0.5 + 0.5 * Math.sin(o.pulse);
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(255,211,107," + (0.15 + glow * 0.2).toFixed(3) + ")";
+    ctx.beginPath(); ctx.ellipse(0, 0, o.w * 1.5, o.h * 1.2, 0, 0, TAU); ctx.fill();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.shadowColor = "rgba(255,211,107,0.95)";
+    ctx.shadowBlur = 20 + glow * 16;
+    ctx.fillStyle = "#3a3010";
+    ctx.strokeStyle = "#ffd36b";
+    ctx.lineWidth = 2.5;
+    rrect(-o.w / 2, -o.h / 2, o.w, o.h, 7); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+}
+
+/* ---------- 赛道边界护栏（随弯道扭曲；第一关为弹球护栏） ---------- */
+function drawRails(camY) {
+  const y0 = camY - 60, y1 = camY + VIEW_H + 60;
+  const step = 26;
+  const b = Game.currentBiome;
+  const l1 = currentLevel === 1;
+  ctx.save();
+  if (b === BIOME.VAULT) {
+    ctx.globalCompositeOperation = "lighter";
+    for (const ex of [-TRACK_EDGE - 18, TRACK_EDGE + 18]) {
+      ctx.strokeStyle = "rgba(255,220,60,0.55)";
+      ctx.lineWidth = 7;
+      ctx.shadowColor = "rgba(255,230,80,1)";
+      ctx.shadowBlur = 22;
+      ctx.beginPath();
+      let first = true;
+      for (let y = y0; y <= y1; y += step) {
+        const x = curveAt(y) + ex;
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = "source-over";
+  }
+  if (b === BIOME.WASTELAND) {
+    for (const ex of [-TRACK_EDGE, TRACK_EDGE]) {
+      for (let y = y0; y <= y1; y += 18) {
+        const x = curveAt(y) + ex;
+        ctx.fillStyle = Math.floor((y + camY) / 18) % 2 === 0 ? "#ffd36b" : "#1a1408";
+        ctx.fillRect(x - 8, y, 16, 14);
+      }
+    }
+  }
+  if (b === BIOME.COLD) {
+    ctx.globalCompositeOperation = "lighter";
+    for (const ex of [-TRACK_EDGE - 14, TRACK_EDGE + 14]) {
+      ctx.strokeStyle = "rgba(80,200,255,0.45)";
+      ctx.lineWidth = 5;
+      ctx.shadowColor = "rgba(120,220,255,0.8)";
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      let first = true;
+      for (let y = y0; y <= y1; y += step) {
+        const x = curveAt(y) + ex;
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalCompositeOperation = "source-over";
+  }
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineWidth = l1 ? 3 : (b === BIOME.VAULT ? 3.2 : 2.6);
+  ctx.strokeStyle = b === BIOME.VAULT ? "rgba(255,220,70,0.62)"
+    : (b === BIOME.COLD ? "rgba(80,200,255,0.35)"
+    : (b === BIOME.FURNACE ? "rgba(255,80,40,0.35)" : (l1 ? "rgba(0,229,255,0.30)" : "rgba(255,45,77,0.32)")));
+  ctx.shadowColor = b === BIOME.VAULT ? "rgba(255,230,90,1)"
+    : (b === BIOME.COLD ? "rgba(120,220,255,0.9)" : (l1 ? "rgba(0,229,255,0.9)" : "rgba(255,45,77,0.9)"));
+  ctx.shadowBlur = b === BIOME.VAULT ? 18 : (l1 ? 14 : 12);
+  for (const ex of [-TRACK_EDGE, TRACK_EDGE]) {
+    ctx.beginPath();
+    let first = true;
+    for (let y = y0; y <= y1; y += step) {
+      const x = curveAt(y) + ex;
+      if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+/* ---------- 随弯道扭曲的滚动车道线 ---------- */
+function drawLaneLines(camY) {
+  const y0 = camY - 60, y1 = camY + VIEW_H + 60;
+  const step = 24;
+  const lanes = [-TRACK_EDGE * 0.5, 0, TRACK_EDGE * 0.5];
+  const b = Game.currentBiome;
+  ctx.save();
+  if (b === BIOME.VAULT) {
+    ctx.setLineDash([14, 18]);
+    ctx.lineDashOffset = -((camY * 1.6) % 32);
+    ctx.lineWidth = 3.2;
+    ctx.strokeStyle = "rgba(255,220,80,0.72)";
+    ctx.shadowColor = "rgba(255,230,90,0.9)";
+    ctx.shadowBlur = 10;
+    for (const lane of lanes) {
+      ctx.beginPath();
+      let first = true;
+      for (let y = y0; y <= y1; y += step) {
+        const x = curveAt(y) + lane;
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+    ctx.setLineDash([]);
+    ctx.restore();
+    return;
+  }
+  if (b === BIOME.FURNACE) {
+    ctx.setLineDash([18, 22]);
+    ctx.lineDashOffset = -((camY * 1.4) % 40);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "rgba(255,200,60,0.55)";
+    for (const lane of lanes) {
+      ctx.beginPath();
+      let first = true;
+      for (let y = y0; y <= y1; y += step) {
+        const x = curveAt(y) + lane;
+        if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+    return;
+  }
+  ctx.setLineDash([26, 30]);
+  ctx.lineDashOffset = -((camY) % 56);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = b === BIOME.COLD ? "rgba(120,220,255,0.28)" : "rgba(255,255,255,0.14)";
+  for (let li = 0; li < lanes.length; li++) {
+    ctx.strokeStyle = li === 1 ? "rgba(120,150,200,0.16)" : "rgba(120,150,200,0.10)";
+    ctx.beginPath();
+    let first = true;
+    for (let y = y0; y <= y1; y += step) {
+      const x = curveAt(y) + lanes[li];
+      if (first) { ctx.moveTo(x, y); first = false; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawGrid(camX, camY) {
+  const step = 64;
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(90,120,180,0.08)";
+  ctx.beginPath();
+  const startX = -((camX % step) + step) % step;
+  const startY = -((camY % step) + step) % step;
+  for (let x = startX; x <= VIEW_W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, VIEW_H); }
+  for (let y = startY; y <= VIEW_H; y += step) { ctx.moveTo(0, y); ctx.lineTo(VIEW_W, y); }
+  ctx.stroke();
+}
+
+function drawTireMarks() {
+  // 沿车身朝向的黑色短条，密集发射后连成连续滑痕（随赛道滚动渐隐）
+  ctx.lineCap = "round";
+  for (let i = 0; i < tireMarks.length; i++) {
+    const m = tireMarks[i];
+    if (m.a <= 0) continue;
+    const half = (m.w || 3.2) + 1.5;
+    const dx = Math.cos(m.ang) * half, dy = Math.sin(m.ang) * half;
+    ctx.strokeStyle = "rgba(10,10,15," + clamp(m.a, 0, 0.62).toFixed(3) + ")";
+    ctx.lineWidth = m.w || 3.2;
+    ctx.beginPath();
+    ctx.moveTo(m.x - dx, m.y - dy);
+    ctx.lineTo(m.x + dx, m.y + dy);
+    ctx.stroke();
+  }
+}
+
+function drawDebris() {
+  for (let i = 0; i < debris.length; i++) {
+    const d = debris[i];
+    const t = 1 - d.life / d.maxLife;
+    ctx.save();
+    ctx.globalAlpha = clamp(t, 0, 1);
+    ctx.translate(d.x, d.y);
+    ctx.rotate(d.rot);
+    ctx.fillStyle = d.color;
+    const s = d.size * (0.5 + t * 0.5);
+    ctx.fillRect(-s / 2, -s / 2, s, s);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawArcs() {
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let i = 0; i < arcs.length; i++) {
+    const a = arcs[i];
+    const t = 1 - a.life / a.maxLife;
+    const alpha = clamp(t, 0, 1);
+    const dx = a.x2 - a.x1, dy = a.y2 - a.y1;
+    const len = Math.hypot(dx, dy) || 1;
+    const px = -dy / len, py = dx / len;   // 法线方向（用于锯齿偏移）
+    const segs = 7;
+    ctx.strokeStyle = "rgba(174,243,255," + (alpha * 0.9).toFixed(3) + ")";
+    // 外层光晕
+    ctx.lineWidth = 5; ctx.globalAlpha = alpha * 0.35;
+    drawLightningPath(a, px, py, segs);
+    // 内层亮线
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(230,253,255," + alpha.toFixed(3) + ")";
+    ctx.lineWidth = 2;
+    drawLightningPath(a, px, py, segs);
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = "source-over";
+}
+function drawLightningPath(a, px, py, segs) {
+  ctx.beginPath();
+  ctx.moveTo(a.x1, a.y1);
+  for (let s = 1; s < segs; s++) {
+    const f = s / segs;
+    const jitter = Math.sin(a.seed + s * 12.9 + a.life * 60) * 14 * (1 - Math.abs(f - 0.5) * 2 + 0.3);
+    const x = a.x1 + (a.x2 - a.x1) * f + px * jitter;
+    const y = a.y1 + (a.y2 - a.y1) * f + py * jitter;
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(a.x2, a.y2);
+  ctx.stroke();
+}
+
+function drawTraffic() {
+  for (let i = 0; i < traffic.length; i++) {
+    const t = traffic[i];
+    if (t.type === "juggernaut") {
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.fillStyle = "#2a2a30";
+      ctx.strokeStyle = "#5a5a68";
+      ctx.lineWidth = 3;
+      rrect(-t.w / 2, -t.h / 2, t.w, t.h, 6); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "rgba(255,40,40,0.85)";
+      rrect(-t.w / 2 + 8, t.h / 2 - 10, t.w - 16, 8, 2); ctx.fill();
+      ctx.restore();
+      continue;
+    }
+    if (t.type === "tick_bomber") {
+      const blink = 0.4 + 0.6 * Math.sin(t.pulse || 0);
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillStyle = "#3a0810";
+      ctx.strokeStyle = "rgba(255,45,77," + blink.toFixed(3) + ")";
+      ctx.lineWidth = 2.5;
+      rrect(-t.w / 2, -t.h / 2, t.w, t.h, 3); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+    const g = t.shade;
+    ctx.save();
+    ctx.translate(t.x, t.y);
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    rrect(-t.w / 2 + 2, -t.h / 2 + 3, t.w, t.h, 5); ctx.fill();
+    ctx.fillStyle = "rgb(" + g + "," + (g + 6) + "," + (g + 14) + ")";
+    ctx.strokeStyle = "rgba(180,195,220,0.35)";
+    ctx.lineWidth = 1.5;
+    rrect(-t.w / 2, -t.h / 2, t.w, t.h, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "rgba(150,170,200,0.22)";
+    rrect(-t.w / 2 + 4, -t.h * 0.22, t.w - 8, t.h * 0.26, 3); ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawPace() {
+  const glow = 0.5 + 0.5 * Math.sin(Pace.pulse);
+  ctx.save();
+  ctx.translate(Pace.x, Pace.y);
+  ctx.rotate(Pace.angle);
+  const L = 50, W = 26;
+  // 外发光
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = "rgba(255,45,77," + (0.12 + glow * 0.12).toFixed(3) + ")";
+  ctx.beginPath(); ctx.ellipse(0, 0, L, W * 1.4, 0, 0, TAU); ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+
+  ctx.shadowColor = "rgba(255,45,77,0.9)";
+  ctx.shadowBlur = 18 + glow * 12;
+  ctx.fillStyle = "#3a0c14";
+  ctx.strokeStyle = "#ff2d4d";
+  ctx.lineWidth = 2.5;
+  rrect(-L / 2, -W / 2, L, W, 7); ctx.fill(); ctx.stroke();
+  ctx.shadowBlur = 0;
+  // 车头亮条
+  ctx.fillStyle = "#ff6b81";
+  rrect(L / 2 - L * 0.24, -W / 2 + 3, L * 0.2, W - 6, 3); ctx.fill();
+  ctx.restore();
+}
+
+function drawSparks() {
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let i = 0; i < sparks.length; i++) {
+    const s = sparks[i];
+    const t = 1 - s.life / s.maxLife;
+    const alpha = clamp(t, 0, 1);
+    const beh = s.behavior || "default";
+    const r = s.size * (0.4 + t) * s.glow;
+
+    if ((beh === "plasma" || beh === "rotary") && s.prevX != null) {
+      const a = alpha * 0.85;
+      ctx.strokeStyle = "hsla(" + s.hue + ", 100%, " + (beh === "rotary" ? "65" : "70") + "%, " + (a * 0.55).toFixed(3) + ")";
+      ctx.lineWidth = r * (beh === "rotary" ? 1.8 : 1.4);
+      ctx.beginPath();
+      ctx.moveTo(s.prevX, s.prevY);
+      ctx.lineTo(s.x, s.y);
+      ctx.stroke();
+      ctx.fillStyle = "hsla(" + (s.hue + 20) + ", 100%, 92%, " + a.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.9, 0, TAU); ctx.fill();
+    } else if (beh === "aero") {
+      const fa = alpha * 0.7;
+      ctx.strokeStyle = "rgba(240,250,255," + fa.toFixed(3) + ")";
+      ctx.lineWidth = r * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(s.x, s.y);
+      ctx.lineTo(s.x - s.vx * 0.04, s.y - s.vy * 0.04);
+      ctx.stroke();
+    } else if (beh === "heat") {
+      const fa = alpha * 0.75;
+      ctx.fillStyle = "hsla(" + s.hue + ", 100%, 55%, " + (fa * 0.35).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 2.5, 0, TAU); ctx.fill();
+      ctx.fillStyle = "hsla(" + (s.hue + 10) + ", 100%, 75%, " + fa.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, TAU); ctx.fill();
+    } else if (beh === "biomech") {
+      const fa = alpha * 0.85;
+      ctx.fillStyle = "hsla(" + s.hue + ", 80%, 60%, " + (fa * 0.4).toFixed(3) + ")";
+      ctx.fillRect(s.x - r, s.y - r * 0.5, r * 2, r);
+      ctx.fillStyle = "hsla(" + (s.hue + 30) + ", 90%, 80%, " + fa.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.6, 0, TAU); ctx.fill();
+    } else if (beh === "sparks") {
+      ctx.fillStyle = "hsla(" + s.hue + ", 90%, 55%, " + alpha.toFixed(3) + ")";
+      ctx.fillRect(s.x - r * 0.4, s.y - r * 0.4, r * 0.8, r * 0.8);
+    } else if (beh === "frost") {
+      const fa = alpha * 0.55 * (1 - s.life / s.maxLife * 0.5);
+      ctx.fillStyle = "hsla(" + s.hue + ", 30%, 96%, " + fa.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 1.6, 0, TAU); ctx.fill();
+    } else if (beh === "frequency") {
+      const fa = alpha * 0.9;
+      ctx.fillStyle = "hsla(" + s.hue + ", 95%, 55%, " + (fa * 0.35).toFixed(3) + ")";
+      ctx.fillRect(s.x - r, s.y - r * 0.4, r * 2, r * 0.8);
+      ctx.fillStyle = "hsla(" + (s.hue + 8) + ", 100%, 75%, " + fa.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.7, 0, TAU); ctx.fill();
+    } else if (beh === "gold_sparks") {
+      const ga = alpha;
+      ctx.fillStyle = "hsla(" + s.hue + ", 100%, 55%, " + (ga * 0.4).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 2.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = "hsla(" + (s.hue + 6) + ", 100%, 78%, " + ga.toFixed(3) + ")";
+      ctx.fillRect(s.x - r * 0.5, s.y - r * 0.5, r, r);
+    } else {
+      ctx.fillStyle = "hsla(" + s.hue + ", 100%, 62%, " + (alpha * 0.30 * s.glow).toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r * 2.8, 0, TAU); ctx.fill();
+      ctx.fillStyle = "hsla(" + (s.hue + 12) + ", 100%, 88%, " + alpha.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, TAU); ctx.fill();
+    }
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function drawAirflow() {
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let i = 0; i < airflow.length; i++) {
+    const a = airflow[i];
+    const t = 1 - a.life / a.maxLife;
+    const alpha = clamp(t, 0, 1) * 0.5;
+    const len = 0.05;
+    ctx.strokeStyle = "rgba(220,240,255," + alpha.toFixed(3) + ")";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(a.x - a.vx * len, a.y - a.vy * len);
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = "source-over";
+}
+
+/* ---------- KERS 爆气速度线（屏幕空间，向中心汇聚） ---------- */
+function drawSpeedLines() {
+  const cx = VIEW_W / 2, cy = VIEW_H / 2;
+  const maxR = Math.hypot(cx, cy);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.lineCap = "round";
+  for (let i = 0; i < speedLines.length; i++) {
+    const L = speedLines[i];
+    const frac = L.phase % 1;                  // 0→1 由外向内推进
+    const outer = maxR * (0.5 + frac * 0.55);
+    const inner = outer - maxR * L.len;
+    const ca = Math.cos(L.ang), sa = Math.sin(L.ang);
+    const x1 = cx + ca * outer, y1 = cy + sa * outer;
+    const x2 = cx + ca * Math.max(inner, maxR * 0.18), y2 = cy + sa * Math.max(inner, maxR * 0.18);
+    const fade = Math.sin(frac * Math.PI);     // 中段最亮
+    const alpha = clamp(L.a * fade, 0, 1) * 0.8;
+    ctx.strokeStyle = L.cyan
+      ? "rgba(174,243,255," + alpha.toFixed(3) + ")"
+      : "rgba(245,252,255," + alpha.toFixed(3) + ")";
+    ctx.lineWidth = 1 + frac * 3;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawCarBody(th, L, W, drifting, boostGlow) {
+  const skin = th.skin || "forge";
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  rrect(-L / 2 + 3, -W / 2 + 4, L, W, 6); ctx.fill();
+
+  if (drifting || boostGlow) {
+    ctx.shadowColor = boostGlow ? "rgba(59,209,255,0.95)" : th.glow;
+    ctx.shadowBlur = boostGlow ? 26 : 18;
+  }
+
+  function bodyFill(radius) {
+    ctx.fillStyle = drifting ? th.bodyDrift : th.body;
+    rrect(-L / 2, -W / 2, L, W, radius); ctx.fill();
+    ctx.strokeStyle = drifting ? th.strokeDrift : th.stroke;
+    ctx.lineWidth = 2;
+    rrect(-L / 2, -W / 2, L, W, radius); ctx.stroke();
+  }
+
+  if (skin === "forge") {
+    bodyFill(4);
+    ctx.fillStyle = "#ffd36b";
+    rrect(-L * 0.28, W / 2 - 4, L * 0.18, 3, 1); ctx.fill();
+    rrect(L * 0.08, -W / 2 + 1, L * 0.14, 3, 1); ctx.fill();
+    ctx.fillStyle = "#ff6b3c";
+    rrect(-L * 0.42, -W / 2 - 1, 5, W + 2, 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,70,20,0.55)";
+    rrect(-L / 2 + 3, W / 2 - 4, L - 6, 4, 2); ctx.fill();
+  } else if (skin === "monsoon") {
+    bodyFill(6);
+    ctx.strokeStyle = "rgba(61,255,138,0.55)"; ctx.lineWidth = 2;
+    for (let sy = -W * 0.35; sy <= W * 0.35; sy += 6) {
+      ctx.beginPath(); ctx.moveTo(-L * 0.38, sy); ctx.lineTo(L * 0.2, sy); ctx.stroke();
+    }
+    ctx.fillStyle = "#3dff8a";
+    rrect(-L * 0.12, -W / 2 + 2, 4, W - 4, 1); ctx.fill();
+    rrect(L * 0.18, -W / 2 + 2, 4, W - 4, 1); ctx.fill();
+  } else if (skin === "storm") {
+    bodyFill(5);
+    ctx.strokeStyle = "rgba(95,168,255,0.45)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-L * 0.35, -W / 2 + 3); ctx.lineTo(L * 0.15, -W / 2 + 3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-L * 0.2, W / 2 - 3); ctx.lineTo(L * 0.25, W / 2 - 3); ctx.stroke();
+    ctx.fillStyle = th.accent;
+    rrect(-L * 0.45, W / 2 - 2, L * 0.12, 3, 1); ctx.fill();
+    rrect(L * 0.28, -W / 2 - 1, L * 0.12, 3, 1); ctx.fill();
+  } else if (skin === "spectra" || skin === "scale64") {
+    const g = ctx.createLinearGradient(-L / 2, 0, L / 2, 0);
+    g.addColorStop(0, "#2a3038"); g.addColorStop(0.35, "#5a626c"); g.addColorStop(0.65, "#8a929c"); g.addColorStop(1, "#3a4048");
+    ctx.fillStyle = drifting ? "#4a5058" : g;
+    rrect(-L / 2, -W / 2, L, W, 5); ctx.fill();
+    ctx.strokeStyle = drifting ? th.strokeDrift : "#a0a8b0";
+    ctx.lineWidth = 2; rrect(-L / 2, -W / 2, L, W, 5); ctx.stroke();
+    ctx.fillStyle = th.accent;
+    rrect(L / 2 - L * 0.22, -W / 2 + 3, L * 0.18, W - 6, 2); ctx.fill();
+    ctx.fillStyle = "#050608";
+    rrect(-L * 0.08, -W / 2 + 4, L * 0.32, W - 8, 2); ctx.fill();
+  } else if (skin === "abyssal") {
+    bodyFill(5);
+    ctx.strokeStyle = "rgba(139,26,42,0.85)"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-L * 0.05, -W * 0.35); ctx.lineTo(-L * 0.05, W * 0.35); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-L * 0.22, 0); ctx.lineTo(L * 0.08, 0); ctx.stroke();
+    ctx.strokeStyle = "rgba(139,26,42,0.35)"; ctx.lineWidth = 1;
+    for (let sy = -W * 0.3; sy <= W * 0.3; sy += 5) {
+      ctx.beginPath(); ctx.moveTo(-L * 0.35, sy); ctx.lineTo(L * 0.15, sy); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(107,20,32,0.7)";
+    rrect(L / 2 - L * 0.3, -W / 2 + 2, L * 0.22, W - 4, 2); ctx.fill();
+  } else if (skin === "endurance") {
+    bodyFill(7);
+    ctx.fillStyle = th.accent;
+    rrect(-L * 0.55, -W * 0.55, L * 0.22, W * 1.1, 2); ctx.fill();
+    ctx.fillStyle = "#1a2838";
+    rrect(L / 2 - L * 0.08, -W / 2 + 2, L * 0.06, W - 4, 1); ctx.fill();
+    ctx.strokeStyle = "#6effa6"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-L * 0.1, -W / 2); ctx.lineTo(L * 0.2, -W / 2); ctx.stroke();
+  } else if (skin === "aero") {
+    bodyFill(7);
+    ctx.strokeStyle = "#8b2030"; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(-L * 0.15, -W / 2 + 2); ctx.lineTo(-L * 0.15, W / 2 - 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(L * 0.12, -W / 2 + 2); ctx.lineTo(L * 0.12, W / 2 - 2); ctx.stroke();
+    ctx.fillStyle = "#c03040";
+    rrect(L / 2 - L * 0.05, -W / 2 - 4, L * 0.08, 4, 1); ctx.fill();
+  } else if (skin === "meltdown") {
+    bodyFill(4);
+    ctx.fillStyle = "rgba(255,69,0,0.75)";
+    rrect(L / 2 - L * 0.35, -W / 2 + 4, L * 0.28, W - 8, 3); ctx.fill();
+    ctx.strokeStyle = "#ff8040"; ctx.lineWidth = 1.5;
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath(); ctx.moveTo(-L * 0.35, i * 3); ctx.lineTo(L * 0.35, i * 3); ctx.stroke();
+    }
+  } else if (skin === "biomech") {
+    bodyFill(6);
+    ctx.strokeStyle = "rgba(155,107,255,0.5)"; ctx.lineWidth = 2;
+    for (let sy = -W * 0.3; sy <= W * 0.3; sy += 7) {
+      ctx.beginPath(); ctx.moveTo(-L * 0.3, sy); ctx.quadraticCurveTo(0, sy + (sy > 0 ? -4 : 4), L * 0.25, sy); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(201,179,255,0.35)";
+    rrect(-L * 0.05, -W / 2 + 3, L * 0.2, W - 6, 3); ctx.fill();
+  } else {
+    bodyFill(6);
+    ctx.fillStyle = th.accent;
+    rrect(L / 2 - L * 0.26, -W / 2 + 3, L * 0.22, W - 6, 3); ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
+  const chromeWin = ["spectra", "scale64"];
+  const openWheel = ["aero", "endurance"];
+  if (!chromeWin.includes(skin)) {
+    ctx.fillStyle = skin === "monsoon" ? "rgba(200,210,220,0.15)" : "rgba(180,200,230,0.18)";
+    rrect(-L * 0.1, -W / 2 + 5, L * 0.3, W - 10, 3); ctx.fill();
+  }
+  if (!chromeWin.includes(skin) && !openWheel.includes(skin)) {
+    ctx.fillStyle = "#08090e";
+    const wl = L * 0.18, ww = W * 0.18, wx = L * 0.30, wy = W / 2;
+    [[wx, -wy], [wx, wy], [-wx, -wy], [-wx, wy]].forEach(([px, py]) => {
+      ctx.fillRect(px - wl / 2, py - ww / 2, wl, ww);
+    });
+  } else if (openWheel.includes(skin)) {
+    ctx.fillStyle = "#1a2430";
+    const wl = L * 0.14, ww = W * 0.22, wx = L * 0.28, wy = W / 2 + 2;
+    [[wx, -wy], [wx, wy], [-wx, -wy], [-wx, wy]].forEach(([px, py]) => {
+      ctx.beginPath(); ctx.arc(px, py, wl * 0.55, 0, TAU); ctx.fill();
+      ctx.strokeStyle = "#3a4a5a"; ctx.lineWidth = 1.5; ctx.stroke();
+    });
+  }
+}
+
+function drawCar() {
+  const nfx = Math.cos(Car.angle), nfy = Math.sin(Car.angle);
+  if (Game.boosting) drawBoostFlame(nfx, nfy);
+
+  const blinkHide = Car.invinc > 0 && !Game.boosting && (Math.floor(performance.now() / 70) % 2 === 0);
+  if (!blinkHide) {
+    ctx.save();
+    ctx.translate(Car.x, Car.y);
+    ctx.rotate(Car.angle);
+    if (Game.boostGrip > 0) ctx.scale(1 + 0.05 * Game.boostGrip, 1 - 0.04 * Game.boostGrip);
+    const th = Car.theme || getCurrentCar().theme;
+    drawCarBody(th, Car.length, Car.width, Car.isDrifting, Game.boosting);
+    ctx.restore();
+  }
+  drawTempBar();
+}
+
+/* ---------- 车库展示场景（左侧 68% 工业展台 + 动态灯光） ---------- */
+function spawnGarageDust(cx, cy) {
+  for (let i = 0; i < 28; i++) {
+    garageDust.push({
+      x: cx + rand(-120, 120), y: cy + rand(20, 50),
+      vx: rand(-80, 80), vy: rand(-120, -30),
+      life: 0, maxLife: rand(0.4, 0.9), size: rand(2, 6), a: rand(0.3, 0.7),
+    });
+  }
+}
+function spawnGarageForgeSparks() {
+  const sw = VIEW_W * GARAGE_STAGE_W;
+  for (let i = 0; i < 40; i++) {
+    emitSpark(rand(sw * 0.1, sw * 0.9), rand(20, 80), rand(-1, 1), 1, rand(0.8, 1.6), rand(10, 40), 1.8, "sparks");
+  }
+}
+function updateGarageFx(dt) {
+  const fx = Game.garageFx;
+  if (fx.slam > 0) fx.slam = Math.max(0, fx.slam - dt * 3.2);
+  if (fx.fov > 0) fx.fov = Math.max(0, fx.fov - dt * 2.5);
+  if (fx.revT > 0) fx.revT = Math.max(0, fx.revT - dt);
+  updateCamera(dt);
+  for (let i = garageDust.length - 1; i >= 0; i--) {
+    const d = garageDust[i];
+    d.life += dt;
+    if (d.life >= d.maxLife) { garageDust.splice(i, 1); continue; }
+    d.vx *= Math.pow(0.3, dt);
+    d.vy *= Math.pow(0.3, dt);
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+  }
+}
+function garageOnSwitch() {
+  const elShutter = document.getElementById("garage-shutter");
+  const elGlitch = document.getElementById("garage-glitch");
+  elShutter.classList.remove("on");
+  void elShutter.offsetWidth;
+  elShutter.classList.add("on");
+  elGlitch.classList.remove("on");
+  void elGlitch.offsetWidth;
+  elGlitch.classList.add("on");
+  Game.garageFx.slam = 1;
+  screenShake(10, 0.14);
+  AudioManager.playGarageSwitch();
+  const sw = VIEW_W * GARAGE_STAGE_W;
+  spawnGarageDust(sw * 0.5, VIEW_H * 0.58);
+}
+function garageOnSelect(car) {
+  Game.garageFx.fov = 1;
+  Game.garageFx.revT = 0.85;
+  const sw = VIEW_W * GARAGE_STAGE_W;
+  const cx = sw * 0.5, cy = VIEW_H * 0.5;
+  const saved = { tt: Car.trailType, cfg: Car.trailCfg };
+  Car.trailType = car.trailType;
+  Car.trailCfg = car.trail;
+  for (let i = 0; i < 8; i++) emitTrailSpark(cx + rand(-40, 40), cy + 40, 0, -1, 0.7);
+  Car.trailType = saved.tt;
+  Car.trailCfg = saved.cfg;
+  AudioManager.playGarageRev();
+}
+function garageOnPurchase() {
+  const elStamp = document.getElementById("garage-stamp");
+  elStamp.classList.remove("on");
+  void elStamp.offsetWidth;
+  elStamp.classList.add("on");
+  screenShake(30, 0.38);
+  spawnGarageForgeSparks();
+  AudioManager.playGaragePurchase();
+}
+
+function drawGarageScene() {
+  const t = performance.now() * 0.001;
+  const sw = VIEW_W * GARAGE_STAGE_W;
+  const cx = sw * 0.5;
+  const cy = VIEW_H * 0.52;
+  const car = CAR_ROSTER[Game.garageBrowseIdx];
+  if (!car) return;
+  const fx = Game.garageFx;
+  const zoom = 1 + fx.fov * 0.08;
+  const slamY = -fx.slam * 28;
+
+  // 左侧展台背景
+  const bg = ctx.createRadialGradient(cx, cy, 30, cx, cy, sw * 0.85);
+  bg.addColorStop(0, "rgba(22,32,48,0.98)");
+  bg.addColorStop(1, "rgba(2,3,6,1)");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, sw, VIEW_H);
+  // 右侧遮罩（面板区由 HTML 覆盖）
+  ctx.fillStyle = "rgba(2,3,6,0.15)";
+  ctx.fillRect(sw, 0, VIEW_W - sw, VIEW_H);
+
+  // 工业网格
+  ctx.strokeStyle = "rgba(90,120,180,0.07)";
+  for (let x = 0; x < sw; x += 48) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, VIEW_H); ctx.stroke(); }
+  for (let y = 0; y < VIEW_H; y += 48) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(sw, y); ctx.stroke(); }
+
+  // 展台底盘 + 动态灯光
+  const platY = cy + 72;
+  ctx.fillStyle = "rgba(8,12,20,0.9)";
+  ctx.strokeStyle = "rgba(0,229,255,0.2)";
+  ctx.lineWidth = 2;
+  rrect(cx - 160, platY - 12, 320, 24, 6); ctx.fill(); ctx.stroke();
+  ctx.globalCompositeOperation = "lighter";
+  const spot = ctx.createRadialGradient(cx, platY, 8, cx, platY, 200);
+  spot.addColorStop(0, car.color + "55");
+  spot.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = spot;
+  ctx.beginPath(); ctx.ellipse(cx, platY, 200, 36, 0, 0, TAU); ctx.fill();
+  // 扫射灯光
+  const lx = cx + Math.sin(t * 0.7) * 100;
+  const spot2 = ctx.createRadialGradient(lx, platY - 80, 4, lx, platY, 160);
+  spot2.addColorStop(0, "rgba(174,243,255,0.25)");
+  spot2.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = spot2;
+  ctx.beginPath(); ctx.ellipse(lx, platY, 160, 30, 0, 0, TAU); ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+
+  // 灰尘粒子
+  for (let i = 0; i < garageDust.length; i++) {
+    const d = garageDust[i];
+    const a = (1 - d.life / d.maxLife) * d.a;
+    ctx.fillStyle = "rgba(180,170,150," + a.toFixed(3) + ")";
+    ctx.fillRect(d.x, d.y, d.size, d.size * 0.6);
+  }
+
+  Game.garageSpin += 0.0035;
+  const ang = -Math.PI / 2 + Math.sin(Game.garageSpin) * 0.1;
+  const scale = 2.6 * zoom;
+  const previewX = cx, previewY = cy + slamY;
+  const nfx = Math.cos(ang), nfy = Math.sin(ang);
+  const nrx = -Math.sin(ang), nry = Math.cos(ang);
+  const rearX = previewX - nfx * (car.params.length * 0.32 * scale);
+  const rearY = previewY - nfy * (car.params.length * 0.32 * scale);
+  const halfW = car.params.width * 0.42 * scale;
+  const savedTrail = Car.trailType, savedCfg = Car.trailCfg;
+  Car.trailType = car.trailType;
+  Car.trailCfg = car.trail;
+  const trailRate = fx.revT > 0 ? 1 : 2;
+  if (Math.floor(t * 28) % trailRate === 0) {
+    emitTrailSpark(rearX + nrx * halfW, rearY + nry * halfW, -nfx, -nfy, 0.85 + fx.revT * 0.3);
+    emitTrailSpark(rearX - nrx * halfW, rearY - nry * halfW, -nfx, -nfy, 0.85 + fx.revT * 0.3);
+  }
+  Car.trailType = savedTrail;
+  Car.trailCfg = savedCfg;
+  drawSparks();
+
+  ctx.save();
+  ctx.translate(previewX, previewY);
+  ctx.rotate(ang);
+  ctx.scale(scale, scale);
+  drawCarBody(car.theme, car.params.length, car.params.width, true, false);
+  ctx.restore();
+
+  if (PlayerAssets.equippedCarId === car.id) {
+    ctx.font = "bold 11px Consolas, monospace";
+    ctx.fillStyle = "rgba(110,255,166,0.9)";
+    ctx.textAlign = "center";
+    ctx.fillText("◆ EQUIPPED", cx, previewY - car.params.length * scale * 0.65);
+  }
+
+  // 热浪扭曲（Core-Meltdown 预览）
+  if (car.trailType === "heat" && fx.revT > 0) {
+    ctx.strokeStyle = "rgba(255,80,30," + (fx.revT * 0.15).toFixed(3) + ")";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(4, 4, sw - 8, VIEW_H - 8);
+  }
+}
+
+function drawBoostFlame(nfx, nfy) {
+  const baseX = Car.x - nfx * (Car.length * 0.5);
+  const baseY = Car.y - nfy * (Car.length * 0.5);
+  const flick = rand(0.75, 1.05);
+  const len = Car.length * 2.6 * flick;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let k = 0; k < 5; k++) {
+    const f = k / 4;
+    const px = baseX - nfx * len * f;
+    const py = baseY - nfy * len * f;
+    const r = lerp(Car.width * 0.55, 2, f) * flick;
+    const a = (1 - f) * 0.5;
+    ctx.fillStyle = "rgba(" + Math.floor(120 + f * 135) + "," + Math.floor(220 + f * 35) + ",255," + a.toFixed(3) + ")";
+    ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawTempBar() {
+  if (currentLevel === 1) return;   // 第一关隐藏发热条，专注能量与倒计时
+  const bw = 52, bh = 7;
+  const bx = Car.x - bw / 2;
+  const by = Car.y - 40;
+  const t = Game.temp / 100;
+  const danger = Game.temp >= 80;
+  const blink = danger ? (0.5 + 0.5 * Math.sin(performance.now() / 50)) : 1;
+
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  rrect(bx - 2, by - 2, bw + 4, bh + 4, 4); ctx.fill();
+
+  let col;
+  if (danger) col = "rgba(255," + Math.floor(40 * blink) + "," + Math.floor(60 * blink) + ",1)";
+  else col = "rgb(" + Math.floor(t * 255) + "," + Math.floor(229 - t * 120) + "," + Math.floor(255 - t * 120) + ")";
+
+  ctx.fillStyle = col;
+  if (danger) { ctx.shadowColor = "rgba(255,40,60,0.9)"; ctx.shadowBlur = 14 * blink; }
+  rrect(bx, by, bw * t, bh, 3); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 1;
+  rrect(bx, by, bw, bh, 3); ctx.stroke();
+}
+
+function drawFloaters() {
+  ctx.textAlign = "center";
+  for (let i = 0; i < floaters.length; i++) {
+    const f = floaters[i];
+    const t = 1 - f.life / f.maxLife;
+    const a = clamp(t, 0, 1);
+    const scale = 1 + (1 - t) * 0.4;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.font = "900 " + (20 * scale) + "px 'Segoe UI', sans-serif";
+    ctx.fillStyle = f.color;
+    ctx.shadowColor = f.color;
+    ctx.shadowBlur = 18;
+    ctx.fillText(f.text, f.x, f.y);
+    ctx.restore();
+  }
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- 屏幕边缘指向领航车的箭头（离屏时） ---------- */
+function drawTargetArrow(camX, camY) {
+  if (Game.state !== "playing") return;
+  const sx = Pace.x - camX, sy = Pace.y - camY;
+  const margin = 46;
+  const onScreen = sx > margin && sx < VIEW_W - margin && sy > margin && sy < VIEW_H - margin;
+  if (onScreen) return;
+
+  const cx = VIEW_W / 2, cy = VIEW_H / 2;
+  const ang = Math.atan2(sy - cy, sx - cx);
+  const ex = clamp(sx, margin, VIEW_W - margin);
+  const ey = clamp(sy, margin, VIEW_H - margin);
+
+  // 正向反馈：距离 < 800px 时，箭头由红渐变为绿、整体更亮（“快追上了”）
+  const near = clamp((800 - Game.targetDist) / (800 - CATCH_RADIUS), 0, 1);
+  const cr = Math.round(lerp(255, 110, near));
+  const cg = Math.round(lerp(45, 255, near));
+  const cb = Math.round(lerp(77, 166, near));
+  const col = "rgb(" + cr + "," + cg + "," + cb + ")";
+  const alpha = (0.6 + near * 0.4).toFixed(3);
+
+  ctx.save();
+  ctx.translate(ex, ey);
+  ctx.rotate(ang);
+  const glow = 0.5 + 0.5 * Math.sin(performance.now() / 200);
+  ctx.globalAlpha = Number(alpha);
+  ctx.shadowColor = col;
+  ctx.shadowBlur = 14 + glow * 10 + near * 14;
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.moveTo(16 + near * 6, 0); ctx.lineTo(-10, 9); ctx.lineTo(-10, -9);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+  ctx.shadowBlur = 0;
+  ctx.globalAlpha = 1;
+}
+
+function rrect(x, y, w, h, r) {
+  if (w < 2 * r) r = w / 2;
+  if (h < 2 * r) r = h / 2;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawVignette() {
+  const g = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.3, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.75);
+  g.addColorStop(0, "rgba(0,0,0,0)");
+  g.addColorStop(1, "rgba(0,0,0,0.5)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  // 出界软惩罚：泥黄色边缘提示 + 居中提示
+  if (Game.offTrack && Game.state === "playing") {
+    const mud = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.25, VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.7);
+    mud.addColorStop(0, "rgba(120,90,30,0)");
+    mud.addColorStop(1, "rgba(150,110,40,0.42)");
+    ctx.fillStyle = mud;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.font = "800 18px 'Consolas', monospace";
+    ctx.fillStyle = "rgba(255,210,120," + (0.55 + 0.45 * Math.sin(performance.now() / 90)).toFixed(2) + ")";
+    ctx.fillText("OFF TRACK · 回到赛道内", VIEW_W / 2, 92);
+    ctx.restore();
+  }
+}
+
+/* ============================================================
+   HUD / DOM
+   ============================================================ */
+const elScore = document.querySelector("#score .val");
+const elLevel = document.querySelector("#level .val");
+const elMult = document.querySelector("#mult .val");
+const elMultChip = document.getElementById("mult");
+const elTimer = document.querySelector("#timer .val");
+const elTimerChip = document.getElementById("timer");
+const elDist = document.querySelector("#dist .val");
+const elDistChip = document.getElementById("dist");
+const elCoinAmt = document.getElementById("coin-amt");
+const elTrackBest = document.getElementById("track-best");
+const elTrackBestVal = document.getElementById("track-best-val");
+const elEnergyWrap = document.getElementById("energy-wrap");
+const elEnergyFill = document.getElementById("energy-fill");
+const elEnergyLabel = document.querySelector("#energy-label");
+const elStatus = document.getElementById("status");
+const elArmorPips = document.querySelectorAll("#armor .pip");
+const elBurn = document.getElementById("burn");
+const elOffEdge = document.getElementById("offedge");
+const elFlash = document.getElementById("flash");
+const elWFlash = document.getElementById("wflash");
+const elOver = document.getElementById("over");
+const elOverReason = document.getElementById("over-reason");
+const elOverScore = document.getElementById("over-score");
+const elOverCoins = document.getElementById("over-coins");
+const elOverTotal = document.getElementById("over-total");
+const elCombo = document.getElementById("combo");
+const elComboNum = document.getElementById("combo-num");
+const elComboBar = document.getElementById("combo-bar");
+const elLevelUp = document.getElementById("levelup");
+const elLevelUpText = document.getElementById("levelup-text");
+const elBoostHint = document.getElementById("boosthint");
+
+let levelUpTimer = null;
+function showLevelUp(n) {
+  elLevelUpText.textContent = "LEVEL UP : " + n;
+  elLevelUp.classList.remove("on");
+  void elLevelUp.offsetWidth;   // 重启动画
+  elLevelUp.classList.add("on");
+  clearTimeout(levelUpTimer);
+  levelUpTimer = setTimeout(() => elLevelUp.classList.remove("on"), 1300);
+}
+
+function updateHUD() {
+  elScore.textContent = Math.floor(Game.score).toLocaleString();
+  elLevel.textContent = currentLevel;
+  elMult.textContent = "x" + Game.multiplier;
+  elMultChip.classList.toggle("hot", Game.multiplier > 1);
+  elCoinAmt.textContent = PlayerAssets.coins.toLocaleString();
+
+  const trackBest = getLevelHighScore(currentLevel);
+  elTrackBestVal.textContent = trackBest != null ? trackBest.toLocaleString() : "---";
+
+  // 倒计时（越野时高频标红警报）
+  elTimer.textContent = Game.timeLeft.toFixed(1);
+  elTimerChip.classList.toggle("warn", Game.timeLeft <= 8 && !Game.offTrack);
+  elTimerChip.classList.toggle("offtrack", Game.offTrack && Game.state === "playing");
+  elOffEdge.classList.toggle("on", Game.offTrack && Game.state === "playing");
+
+  // 距离指示
+  elDist.textContent = Math.round(Game.targetDist);
+  elDistChip.classList.toggle("lock", Game.targetDist < CATCH_RADIUS * 1.6);
+
+  // 能量条
+  elEnergyFill.style.width = Game.energy.toFixed(1) + "%";
+  const full = Game.energy >= 100;
+  elEnergyWrap.classList.toggle("full", full);
+  elEnergyWrap.classList.toggle("draft", Game.slipstream && !full);
+  elStatus.classList.toggle("boosting", Game.boosting);
+  if (Game.boosting) elEnergyLabel.innerHTML = "<b>BOOST ACTIVE " + Game.boostTimer.toFixed(1) + "s</b>";
+  else if (isBonusStage()) elEnergyLabel.innerHTML = "<b style='color:#ffd36b'>VAULT KERS · INFINITE</b>";
+  else if (full) elEnergyLabel.innerHTML = "KERS READY · 按 <b>SHIFT</b> 爆发";
+  else if (Game.slipstream) elEnergyLabel.innerHTML = "<b style='color:#dcefff'>SLIPSTREAM 尾流充能</b> " + Math.floor(Game.energy) + "%";
+  else elEnergyLabel.textContent = "KERS ENERGY " + Math.floor(Game.energy) + "%";
+
+  // 第一关 Boost 引导：开局 3 秒后、能量满、尚未释放过爆发时闪烁提示
+  const showHint = Game.state === "playing" && currentLevel === 1 &&
+                   Game.playTime > 3 && Game.energy >= 100 &&
+                   !Game.boosting && !Game.hasBoosted;
+  elBoostHint.classList.toggle("on", showHint);
+
+  // 装甲格
+  for (let i = 0; i < elArmorPips.length; i++) {
+    elArmorPips[i].classList.toggle("lost", i >= Game.armor);
+  }
+
+  // Combo
+  const comboLive = Game.combo > 0 && Game.state === "playing";
+  elCombo.classList.toggle("on", comboLive);
+  if (comboLive) {
+    elComboNum.textContent = Game.combo;
+    const remain = 1 - clamp(Game.straightTimer / 1.5, 0, 1);
+    elComboBar.style.width = (remain * 100).toFixed(1) + "%";
+  }
+
+  // 过热闪烁
+  if (Game.state === "playing" && Game.temp >= 80 && !Game.boosting) {
+    const blink = 0.5 + 0.5 * Math.sin(performance.now() / 60);
+    elBurn.style.opacity = ((Game.temp - 80) / 20 * 0.8 * blink).toFixed(3);
+  } else {
+    elBurn.style.opacity = "0";
+  }
+}
+
+let flashTimer = null;
+function flashScreen() {
+  elFlash.classList.add("on");
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => elFlash.classList.remove("on"), 120);
+}
+function flashBurn() {
+  elBurn.style.transition = "none";
+  elBurn.style.opacity = "0.9";
+  setTimeout(() => { elBurn.style.transition = "opacity .25s"; elBurn.style.opacity = "0"; }, 30);
+}
+let wflashTimer = null;
+function flashWhite() {
+  elWFlash.classList.add("on");
+  clearTimeout(wflashTimer);
+  wflashTimer = setTimeout(() => elWFlash.classList.remove("on"), 70);
+}
+
+function showOver() {
+  elOverReason.textContent = Game.overReason;
+  elOverScore.textContent = Math.floor(Game.score).toLocaleString();
+  elOverCoins.textContent = Game.runCoins.toLocaleString();
+  elOverTotal.textContent = PlayerAssets.coins.toLocaleString();
+  elOver.classList.add("show");
+  elBurn.style.opacity = "0";
+}
+function hideOver() { elOver.classList.remove("show"); }
+
+function clearParticles() {
+  tireMarks.length = 0;
+  sparks.length = 0;
+  floaters.length = 0;
+  airflow.length = 0;
+  debris.length = 0;
+  arcs.length = 0;
+  speedLines.length = 0;
+  garageDust.length = 0;
+  roadHazards.length = 0;
+  biomeParticles.length = 0;
+}
+
+/* ============================================================
+   全局重置 / 暂停 —— 防御性垃圾回收
+   ============================================================ */
+const elPause = document.getElementById("pause");
+const elPauseResume = document.getElementById("pause-resume");
+const elPauseAbort = document.getElementById("pause-abort");
+
+function canPauseFromPlay() {
+  return Game.state === GameState.PLAYING;
+}
+
+function purgeRunState() {
+  accumulator = 0;
+  Game.timeScale = 1;
+  Game.hitstop = 0;
+  Game.boosting = false;
+  Game.boostTimer = 0;
+  Game.boostGrip = 0;
+  Game.boostPrev = false;
+  Game.biomeGlitch = 0;
+  Game.shake = 0;
+  Game.shakeX = 0;
+  Game.shakeY = 0;
+  Game.shakeHold = 0;
+  Game.shakeHoldT = 0;
+  Game.energy = 0;
+  Game.temp = 0;
+  Game.armor = MAX_ARMOR;
+  Game.score = 0;
+  Game.runCoins = 0;
+  Game.multiplier = 1;
+  Game.combo = 0;
+  Game.caught = false;
+  Game.offTrack = false;
+  clearParticles();
+  clearTutObstacles();
+  traffic.length = 0;
+  chicanes.length = 0;
+  roadHazards.length = 0;
+  biomeParticles.length = 0;
+  sparks.length = 0;
+  Car.reset();
+  resetPace();
+  hideTutMsg();
+}
+
+function abortMission() {
+  const wasNormal = Game.mode === "normal";
+  purgeRunState();
+  hideOver();
+  hideResult();
+  elGarage.classList.remove("on");
+  if (wasNormal) {
+    Game.state = GameState.MENU;
+    openLevelSelect();
+  } else {
+    Game.state = GameState.VEHICLE;
+    elLevelSelect.classList.remove("on");
+    elStart.style.display = "grid";
+    elStart.classList.remove("fade");
+  }
+  setHudVisibility();
+  updateHUD();
+}
+
+function resetGame() {
+  purgeRunState();
+  Game.state = GameState.VEHICLE;
+  Game.mode = "normal";
+  Game.pauseReturn = null;
+  hideOver();
+  hideResult();
+  elGarage.classList.remove("on");
+  elLevelSelect.classList.remove("on");
+  elStart.style.display = "grid";
+  elStart.classList.remove("fade");
+  setHudVisibility();
+  updateHUD();
+}
+
+function pauseGame() {
+  if (!canPauseFromPlay()) return;
+  Game.pauseReturn = { mode: Game.mode, level: currentLevel };
+  for (const k in keys) keys[k] = false;
+  Game.boostPrev = false;
+  Game.state = GameState.PAUSED;
+}
+
+function resumeGame() {
+  if (Game.state !== GameState.PAUSED) return;
+  Game.state = GameState.PLAYING;
+  pauseMenuRects = null;
+}
+
+elPauseResume.addEventListener("click", resumeGame);
+elPauseAbort.addEventListener("click", abortMission);
+
+/* ============================================================
+   关卡选择大厅 + 关卡/引导启动 + 引导关卡脚本
+   状态流转：vehicle → menu → playing/tutorial → over → menu
+   ============================================================ */
+const elLevelSelect = document.getElementById("levelselect");
+const elStageGrid = document.getElementById("stage-grid");
+const elStageBonus = document.getElementById("stage-bonus");
+const elChangeCar = document.getElementById("ls-change-car");
+const elTutMsg = document.getElementById("tutmsg");
+const elTutText = document.getElementById("tutmsg-text");
+const elResult = document.getElementById("result");
+const elResultTitle = document.getElementById("result-title");
+const elResultSub = document.getElementById("result-sub");
+const elHud = document.getElementById("hud");
+const elCoins = document.getElementById("coins");
+const elHelp = document.getElementById("help");
+const elArmorBox = document.getElementById("armor");
+const elOverBack = document.getElementById("over-back");
+
+function buildStageGrid() {
+  elStageGrid.innerHTML = "";
+  elStageBonus.innerHTML = "";
+  for (let s = 1; s <= 9; s++) {
+    const card = document.createElement("div");
+    if (s <= PlayerAssets.unlockedStage) {
+      card.className = "scard unlocked";
+      card.innerHTML = '<div class="snum">' + s + '</div><div class="slabel">STAGE ' + s + ' · ' + BIOME_NAMES[levelToBiome(s)] + '</div>';
+      card.addEventListener("click", () => startStage(s));
+    } else {
+      card.className = "scard locked";
+      card.innerHTML = '<div class="snum">' + s + '</div><div class="slabel">LOCKED</div>';
+    }
+    elStageGrid.appendChild(card);
+  }
+  const bonus = document.createElement("div");
+  if (10 <= PlayerAssets.unlockedStage) {
+    bonus.className = "scard bonus unlocked";
+    bonus.innerHTML = '<div class="slabel">STAGE 10 - GOLDEN HEIST</div>';
+    bonus.addEventListener("click", () => startStage(10));
+  } else {
+    bonus.className = "scard bonus locked";
+    bonus.innerHTML = '<div class="slabel">STAGE 10 - GOLDEN HEIST</div>';
+  }
+  elStageBonus.appendChild(bonus);
+}
+
+function openLevelSelect() {
+  purgeRunState();
+  Game.state = GameState.MENU;
+  Game.mode = "normal";
+  hideOver();
+  hideResult();
+  buildStageGrid();
+  setHudVisibility();
+  elStart.style.display = "none";
+  elLevelSelect.classList.add("on");
+}
+function closeLevelSelect() { elLevelSelect.classList.remove("on"); }
+
+function startStage(level) {
+  closeLevelSelect();
+  currentLevel = level;
+  Game.mode = "normal";
+  const prevBiome = Game.currentBiome;
+  syncBiomeFromLevel(level, prevBiome !== levelToBiome(level));
+  applyCarById(PlayerAssets.equippedCarId);
+  Game.reset();
+  Car.reset();
+  const cfg = stageConfig(level);
+  Game.timeLeft = cfg.timeLimit;
+  if (currentLevel === 1) Game.energy = 100;
+  if (currentLevel === 10) {
+    Game.energy = 100;
+    Game.temp = 0;
+  }
+  clearParticles();
+  clearTutObstacles();
+  chicanes.length = 0;
+  roadHazards.length = 0;
+  biomeParticles.length = 0;
+  hazardSpawnTimer = rand(4, 7);
+  chicaneTimer = 2.5;
+  resetPace();
+  initTraffic();
+  setHudVisibility();
+}
+
+function startProvingGround() {
+  elStart.style.display = "none";
+  closeLevelSelect();
+  currentLevel = 0;
+  Game.mode = "tutorial";
+  syncBiomeFromLevel(0, false);
+  applyCarById(PlayerAssets.equippedCarId);
+  Game.reset();
+  Car.reset();
+  Game.armor = 99;
+  Game.energy = 50;
+  Game.tutSpawnTimer = 1.5;
+  Game.tutTakedowns = 0;
+  clearParticles();
+  clearTutObstacles();
+  chicanes.length = 0;
+  roadHazards.length = 0;
+  traffic.length = 0;
+  setHudVisibility();
+  showTutMsg("DRIFT · TAILWHIP TARGETS · ESC TO PAUSE");
+}
+
+function spawnProvingDummy() {
+  const side = Math.random() < 0.5 ? -1 : 1;
+  const lane = side * rand(TRACK_EDGE * 0.35, TRACK_EDGE * 0.75);
+  const y = Car.y - rand(420, 780);
+  tutObstacles.push({
+    x: curveAt(y) + lane, y: y,
+    w: 44, h: 60, r: 28, alive: true, pulse: rand(0, TAU), stationary: true,
+  });
+}
+function clearTutObstacles() { tutObstacles.length = 0; }
+
+function provingTailwhipCheck() {
+  const spd = Math.hypot(Car.vx, Car.vy);
+  if (!Car.isDrifting || spd < 80) return;
+  const fxh = Math.cos(Car.angle), fyh = Math.sin(Car.angle);
+  const rxh = -Math.sin(Car.angle), ryh = Math.cos(Car.angle);
+  for (let i = 0; i < tutObstacles.length; i++) {
+    const o = tutObstacles[i];
+    if (!o.alive) continue;
+    const dx = o.x - Car.x, dy = o.y - Car.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist - deathHitbox() - o.r >= 0) continue;
+    const inv = 1 / (dist || 1);
+    const ndx = dx * inv, ndy = dy * inv;
+    const contactAngle = Math.abs(Math.atan2(ndx * rxh + ndy * ryh, ndx * fxh + ndy * fyh));
+    if (contactAngle <= 35 * Math.PI / 180) continue;
+    o.alive = false;
+    Game.tutTakedowns++;
+    const cx = Car.x + ndx * Car.radius, cy = Car.y + ndy * Car.radius;
+    for (let k = 0; k < 22; k++) emitSpark(cx, cy, ndx, ndy, rand(0.9, 1.9), rand(42, 55), 1.9);
+    emitDebris(cx, cy, ndx, ndy, 18, true);
+    emitFloater(cx, cy - 30, "TAKEDOWN!", "#ffd36b");
+    screenShake(14, 0.18);
+    flashWhite();
+  }
+}
+
+function updateTutorial(dt) {
+  Game.tutSpawnTimer -= dt;
+  if (Game.tutSpawnTimer <= 0 && tutObstacles.filter((o) => o.alive).length < 4) {
+    spawnProvingDummy();
+    Game.tutSpawnTimer = rand(2.2, 3.8);
+  }
+  for (let i = tutObstacles.length - 1; i >= 0; i--) {
+    if (!tutObstacles[i].alive && tutObstacles[i].y - Car.y > 400) tutObstacles.splice(i, 1);
+    else if (tutObstacles[i].alive && tutObstacles[i].y - Car.y > 600) tutObstacles[i].alive = false;
+  }
+  provingTailwhipCheck();
+}
+
+/* ---------- 居中提示 / 结果横幅 ---------- */
+function showTutMsg(text, variant) {
+  elTutText.textContent = text;
+  elTutMsg.className = "on" + (variant ? " " + variant : "");
+}
+function hideTutMsg() { elTutMsg.className = ""; }
+function showResult(title, sub, color) {
+  elResultTitle.textContent = title;
+  elResultSub.textContent = sub || "";
+  elResult.style.setProperty("--res", color || "#6effa6");
+  elResult.classList.add("on");
+}
+function hideResult() { elResult.classList.remove("on"); }
+
+/* ---------- HUD 显隐：按状态/模式 ---------- */
+function setHudVisibility() {
+  const playing = Game.state === GameState.PLAYING || Game.state === GameState.OVER;
+  const paused = Game.state === GameState.PAUSED;
+  const normal = playing && Game.mode === "normal";
+  const tut = playing && Game.mode === "tutorial";
+  const garage = Game.state === GameState.GARAGE;
+  elHud.style.display = normal ? "flex" : "none";
+  elTrackBest.style.display = normal ? "flex" : "none";
+  elCoins.style.display = ((playing || paused) && !garage) ? "flex" : "none";
+  elStatus.style.display = (playing || paused) ? "block" : "none";
+  elHelp.style.display = normal ? "block" : "none";
+  elArmorBox.style.display = tut ? "none" : "flex";
+}
+
+/* ============================================================
+   车库商城 UI + 主菜单入口
+   ============================================================ */
+const elStart = document.getElementById("start");
+const elDeploy = document.getElementById("deploy-btn");
+const elGarageBtn = document.getElementById("garage-btn");
+const elProving = document.getElementById("proving-btn");
+const elGarage = document.getElementById("garage");
+const elGarageCoins = document.getElementById("garage-coins");
+const elGarageTier = document.getElementById("garage-tier");
+const elGarageName = document.getElementById("garage-name");
+const elGarageCode = document.getElementById("garage-code");
+const elGarageVfxDesc = document.getElementById("garage-vfx-desc");
+const elGaragePrice = document.getElementById("garage-price");
+const elGarageAction = document.getElementById("garage-action");
+const elGaragePrev = document.getElementById("garage-prev");
+const elGarageNext = document.getElementById("garage-next");
+const elGaragePrev2 = document.getElementById("garage-prev2");
+const elGarageNext2 = document.getElementById("garage-next2");
+const elGarageBack = document.getElementById("garage-back");
+const elGarageDots = document.getElementById("garage-dots");
+const elLsGarage = document.getElementById("ls-garage");
+
+const TIER_TAGS = { 1: "废土改装级", 2: "赛博性能级", 3: "极限传奇级" };
+
+function drawGarageRadar(car) {
+  const c = document.getElementById("garage-radar");
+  if (!c) return;
+  const rc = c.getContext("2d");
+  const W = c.width, H = c.height;
+  const cx = W / 2, cy = H / 2 + 8, R = 72;
+  rc.clearRect(0, 0, W, H);
+  const vals = STAT_LABELS.map((s) => car.stats[s.key] / 10);
+  const n = vals.length;
+  const angles = [];
+  for (let i = 0; i < n; i++) angles.push(-Math.PI / 2 + i * TAU / n);
+
+  rc.strokeStyle = "rgba(90,120,180,0.22)";
+  rc.lineWidth = 1;
+  for (let ring = 1; ring <= 5; ring++) {
+    rc.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const a = angles[i % n], r = R * ring / 5;
+      const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+      if (i === 0) rc.moveTo(x, y); else rc.lineTo(x, y);
+    }
+    rc.stroke();
+  }
+  for (let i = 0; i < n; i++) {
+    rc.beginPath();
+    rc.moveTo(cx, cy);
+    rc.lineTo(cx + Math.cos(angles[i]) * R, cy + Math.sin(angles[i]) * R);
+    rc.stroke();
+  }
+
+  rc.beginPath();
+  for (let i = 0; i < n; i++) {
+    const r = R * vals[i];
+    const x = cx + Math.cos(angles[i]) * r, y = cy + Math.sin(angles[i]) * r;
+    if (i === 0) rc.moveTo(x, y); else rc.lineTo(x, y);
+  }
+  rc.closePath();
+  rc.fillStyle = car.color + "44";
+  rc.fill();
+  rc.strokeStyle = car.color;
+  rc.lineWidth = 2;
+  rc.stroke();
+
+  rc.font = "9px Consolas, monospace";
+  rc.fillStyle = "#8a93a6";
+  rc.textAlign = "center";
+  STAT_LABELS.forEach((s, i) => {
+    const a = angles[i];
+    rc.fillText(s.label, cx + Math.cos(a) * (R + 18), cy + Math.sin(a) * (R + 18) + 3);
+  });
+}
+
+function buildGarageStatBars(car) {
+  const el = document.getElementById("garage-statbars");
+  if (!el) return;
+  el.innerHTML = "";
+  STAT_LABELS.forEach((s) => {
+    const v = car.stats[s.key];
+    const row = document.createElement("div");
+    row.className = "garage-statrow";
+    row.innerHTML = '<span class="sl">' + s.label + '</span><span class="sb"><i style="width:' + (v * 10) + '%"></i></span><span class="sv">' + v + '</span>';
+    el.appendChild(row);
+  });
+}
+
+function garageCarIndex(id) {
+  const i = CAR_ROSTER.findIndex((c) => c.id === migrateCarId(id));
+  return i >= 0 ? i : 0;
+}
+
+function buildGarageDots() {
+  elGarageDots.innerHTML = "";
+  CAR_ROSTER.forEach((c, i) => {
+    const dot = document.createElement("i");
+    if (i === Game.garageBrowseIdx) dot.className = "on";
+    elGarageDots.appendChild(dot);
+  });
+}
+
+function refreshGarageUI() {
+  const car = CAR_ROSTER[Game.garageBrowseIdx];
+  if (!car) return;
+  const owned = isCarOwned(car.id);
+  const equipped = PlayerAssets.equippedCarId === car.id;
+  elGarage.style.setProperty("--garage-accent", car.color);
+  elGarageCoins.textContent = PlayerAssets.coins.toLocaleString();
+  elGarageTier.textContent = "TIER " + car.tier + " · " + (TIER_TAGS[car.tier] || "");
+  elGarageTier.className = "garage-tier t" + car.tier;
+  elGarageName.textContent = car.name;
+  elGarageCode.textContent = car.codename;
+  elGarageVfxDesc.textContent = car.vfxDesc || car.desc;
+  drawGarageRadar(car);
+  buildGarageStatBars(car);
+  if (equipped) {
+    elGaragePrice.textContent = "◎ EQUIPPED · 已装备";
+    elGarageAction.textContent = Game.garageReturn === "vehicle" ? "DEPLOY · 出击" : "EQUIPPED";
+    elGarageAction.classList.toggle("disabled", false);
+  } else if (owned) {
+    elGaragePrice.textContent = "OWNED · 已拥有";
+    elGarageAction.textContent = "EQUIP · 装备";
+    elGarageAction.classList.toggle("disabled", false);
+  } else if (car.price <= 0) {
+    elGaragePrice.textContent = "FREE · 免费";
+    elGarageAction.textContent = "UNLOCK · 解锁";
+    elGarageAction.classList.toggle("disabled", false);
+  } else {
+    elGaragePrice.textContent = "PRICE ◎" + car.price.toLocaleString();
+    const canBuy = PlayerAssets.coins >= car.price;
+    elGarageAction.textContent = canBuy ? "BUY ◎" + car.price : "NEED ◎" + car.price;
+    elGarageAction.classList.toggle("disabled", !canBuy);
+  }
+  buildGarageDots();
+}
+
+function openGarage(from) {
+  Game.garageReturn = from || "vehicle";
+  Game.state = "garage";
+  Game.garageBrowseIdx = garageCarIndex(PlayerAssets.equippedCarId);
+  Game.garageSpin = 0;
+  Game.garageFx = { slam: 0, fov: 0, revT: 0 };
+  sparks.length = 0;
+  garageDust.length = 0;
+  hideOver();
+  hideResult();
+  elStart.style.display = "none";
+  closeLevelSelect();
+  elGarage.classList.add("on");
+  refreshGarageUI();
+  garageOnSelect(CAR_ROSTER[Game.garageBrowseIdx]);
+  setHudVisibility();
+}
+
+function closeGarage() {
+  elGarage.classList.remove("on");
+  sparks.length = 0;
+  garageDust.length = 0;
+  applyCarById(PlayerAssets.equippedCarId);
+  if (Game.garageReturn === "menu") {
+    purgeRunState();
+    Game.state = GameState.MENU;
+    elLevelSelect.classList.add("on");
+  } else {
+    Game.state = "vehicle";
+    elStart.style.display = "grid";
+    elStart.classList.remove("fade");
+  }
+  setHudVisibility();
+  updateHUD();
+}
+
+function garageBrowse(delta) {
+  const prev = Game.garageBrowseIdx;
+  Game.garageBrowseIdx = (Game.garageBrowseIdx + delta + CAR_ROSTER.length) % CAR_ROSTER.length;
+  if (Game.garageBrowseIdx !== prev) {
+    sparks.length = 0;
+    garageOnSwitch();
+    garageOnSelect(CAR_ROSTER[Game.garageBrowseIdx]);
+  }
+  refreshGarageUI();
+}
+
+function garageActionClick() {
+  const car = CAR_ROSTER[Game.garageBrowseIdx];
+  if (!car) return;
+  const owned = isCarOwned(car.id);
+  const equipped = PlayerAssets.equippedCarId === car.id;
+
+  if (equipped) {
+    if (Game.garageReturn === "vehicle") {
+      AudioManager.unlock();
+      applyCarById(car.id);
+      elGarage.classList.remove("on");
+      elStart.classList.add("fade");
+      setTimeout(() => { elStart.style.display = "none"; }, 500);
+      openLevelSelect();
+    }
+    return;
+  }
+  if (owned) {
+    PlayerAssets.equippedCarId = car.id;
+    applyCarById(car.id);
+    saveGame();
+    garageOnSelect(car);
+    refreshGarageUI();
+    return;
+  }
+  if (car.price > 0 && PlayerAssets.coins < car.price) return;
+  if (car.price > 0) PlayerAssets.coins -= car.price;
+  PlayerAssets.ownedCars.push(car.id);
+  PlayerAssets.equippedCarId = car.id;
+  applyCarById(car.id);
+  saveGame();
+  garageOnPurchase();
+  refreshGarageUI();
+  updateHUD();
+}
+
+function deploy() {
+  elStart.style.display = "none";
+  openLevelSelect();
+}
+function enterGarage() {
+  openGarage("vehicle");
+}
+elDeploy.addEventListener("click", deploy);
+elDeploy.addEventListener("touchstart", (e) => { e.preventDefault(); deploy(); }, { passive: false });
+elGarageBtn.addEventListener("click", enterGarage);
+elGarageBtn.addEventListener("touchstart", (e) => { e.preventDefault(); enterGarage(); }, { passive: false });
+elProving.addEventListener("click", startProvingGround);
+elProving.addEventListener("touchstart", (e) => { e.preventDefault(); startProvingGround(); }, { passive: false });
+elGaragePrev.addEventListener("click", () => garageBrowse(-1));
+elGarageNext.addEventListener("click", () => garageBrowse(1));
+elGaragePrev2.addEventListener("click", () => garageBrowse(-1));
+elGarageNext2.addEventListener("click", () => garageBrowse(1));
+elGarageAction.addEventListener("click", garageActionClick);
+elGarageBack.addEventListener("click", closeGarage);
+elLsGarage.addEventListener("click", () => { closeLevelSelect(); openGarage("menu"); });
+
+elChangeCar.addEventListener("click", resetGame);
+
+elOverBack.addEventListener("click", () => { if (Game.state === "over") openLevelSelect(); });
+
+loadGame();
+applyCarById(PlayerAssets.equippedCarId);
+
+/* ============================================================
+   主循环：固定步长物理 + 渲染解耦 + 子弹时间缩放
+   ============================================================ */
+const FIXED_DT = 1 / 120;
+let accumulator = 0;
+let lastTime = performance.now();
+let hudTimer = 0;
+
+function loop(now) {
+  let frameTime = (now - lastTime) / 1000;
+  lastTime = now;
+  if (frameTime > 0.1) frameTime = 0.1;
+
+  if (Game.state === "garage") {
+    updateGarageFx(frameTime);
+    updateParticles(frameTime);
+    draw();
+    hudTimer += frameTime;
+    if (hudTimer > 0.05) { updateHUD(); hudTimer = 0; }
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  if (Game.state === GameState.PAUSED) {
+    draw();
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  if (keys.reset) {
+    keys.reset = false;
+    if (Game.state === GameState.PLAYING || Game.state === GameState.OVER) openLevelSelect();
+  }
+
+  if (Game.state === "playing") {
+    AudioManager.playEngineDrone(Game.temp);
+
+    if (Game.hitstop > 0) {
+      Game.hitstop -= frameTime;
+      if (Game.hitstop <= 0) Game.timeScale = 1;
+    }
+    const scaled = frameTime * Game.timeScale;
+
+    accumulator += scaled;
+    let steps = 0;
+    while (accumulator >= FIXED_DT && steps < 8) {
+      if (Game.mode === "tutorial") {
+        updatePhysics(FIXED_DT);
+        updateThermal(FIXED_DT);
+        updateBoost(FIXED_DT);
+        updateInvinc(FIXED_DT);
+        updateMultiplier(FIXED_DT);
+        updateTutorial(FIXED_DT);
+        updateBiomeFx(FIXED_DT);
+        updateParticles(FIXED_DT);
+      } else {
+        updatePhysics(FIXED_DT);
+        updateThermal(FIXED_DT);
+        updatePace(FIXED_DT);
+        updateTraffic(FIXED_DT);
+        updateChicanes(FIXED_DT);
+        updateRoadHazards(FIXED_DT);
+        updateHazardSpawners(FIXED_DT);
+        updateBiomeFx(FIXED_DT);
+        updateSlipstream(FIXED_DT);
+        updateCharge(FIXED_DT);
+        updateCountdown(FIXED_DT);
+        updateBoost(FIXED_DT);
+        updateInvinc(FIXED_DT);
+        updateCombo(FIXED_DT);
+        updateMultiplier(FIXED_DT);
+        updateParticles(FIXED_DT);
+      }
+      accumulator -= FIXED_DT;
+      steps++;
+      if (Game.state !== "playing") break;
+    }
+    updateCamera(frameTime);
+  } else {
+    updateParticles(frameTime);
+    updateCamera(frameTime);
+  }
+
+  draw();
+
+  hudTimer += frameTime;
+  if (hudTimer > 0.05) { updateHUD(); hudTimer = 0; }
+
+  requestAnimationFrame(loop);
+}
+
+/* ---------- 启动 ---------- */
+syncBiomeFromLevel(1, false);
+Car.reset();
+resetPace();
+initTraffic();
+setHudVisibility();      // 起始车型界面：隐藏游戏内 HUD
+updateHUD();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
